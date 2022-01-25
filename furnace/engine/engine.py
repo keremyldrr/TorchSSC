@@ -3,6 +3,7 @@
 # @Time    : 2018/8/2 下午3:23
 # @Author  : yuchangqian
 # @Contact : changqian_yu@163.com
+
 # @File    : engine.py
 import os
 import os.path as osp
@@ -56,12 +57,14 @@ class Engine(object):
 
         self.continue_state_object = self.args.continue_fpath
 
-        if 'WORLD_SIZE' in os.environ:
+        if 'WORLD_SIZE' in os.environ: # some way to enforce this
             self.distributed = int(os.environ['WORLD_SIZE']) >= 1
 
         if self.distributed:
+            
             self.local_rank = self.args.local_rank
             self.world_size = int(os.environ['WORLD_SIZE'])
+            print(self.local_rank)
             torch.cuda.set_device(self.local_rank)
             os.environ['MASTER_PORT'] = self.args.port
             dist.init_process_group(backend="nccl", init_method='env://')
@@ -78,12 +81,30 @@ class Engine(object):
                        dest="continue_fpath",
                        help='continue from one certain checkpoint')
         p.add_argument('--local_rank', default=0, type=int,
-                       help='process rank on node')
+                        help='process rank on node')
         p.add_argument('-p', '--port', type=str,
                        default='16001',
                        dest="port",
                        help='port for init_process_group')
-
+        p.add_argument('-l', '--logdir', type=str,
+                       default='log',
+                       dest="logdir",
+                       help='Logging directory for experiments')
+        p.add_argument('--lr', type=float,
+                       default=0.1,
+                       dest="lr",
+                       help='Learning rate for experiments')
+        p.add_argument('--ew', type=float,
+                       default=1.0,
+                       dest="ew",
+                       help='Empty voxel weight for experiments')
+        p.add_argument('--num_epochs', type=int,
+                       default=250,
+                       dest="num_epochs",
+                       help='Number of epochs to train for experiments')
+        p.add_argument('--only_frustum', dest='only_frustum', type=bool,default=False)               
+        p.add_argument('--only_boxes', dest='only_boxes', type=bool,default=False)               
+        p.add_argument('--dataset',type=str,default="NYUv2",dest='dataset')
     def register_state(self, **kwargs):
         self.state.register(**kwargs)
 

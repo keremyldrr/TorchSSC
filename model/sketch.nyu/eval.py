@@ -9,13 +9,14 @@ import torch
 import torch.nn as nn
 import torch.multiprocessing as mp
 
-from config import config
+from config import config, update_parameters_in_config
 from utils.pyt_utils import ensure_dir, link_file, load_model, parse_devices
 from utils.visualize import print_iou, show_img
 from engine.evaluator import Evaluator
 from engine.logger import get_logger
 from seg_opr.metric import hist_info, compute_score
 from nyu import NYUv2
+from scannet import ScanNet
 from network import Network
 from dataloader import ValPre
 from torch.utils.data import dataloader
@@ -51,14 +52,15 @@ class SegEvaluator(Evaluator):
         tsdf = data['tsdf']
         label_weight = data['label_weight']
         depth_mapping_3d = data['depth_mapping_3d']
-
+        import cv2
+        
         name = data['fn']
         sketch_gt = data['sketch_gt']
         pred, pred_sketch = self.eval_ssc(img, hha, tsdf, depth_mapping_3d, sketch_gt, device)
 
         results_dict = {'pred':pred, 'label':label, 'label_weight':label_weight,
                         'name':name, 'mapping':depth_mapping_3d}
-
+        pred = (pred.flatten() * label_weight).reshape([60,36,60])
         if self.save_path is not None:
             ensure_dir(self.save_path)
             ensure_dir(self.save_path+'_sketch')
@@ -96,7 +98,7 @@ class SegEvaluator(Evaluator):
             flat_pred = np.ravel(pred)
             flat_label = np.ravel(label)
 
-            nonefree = np.where(label_weight > 0)  # Calculate the SSC metric. Exculde the seen atmosphere and the invalid 255 area
+            nonefree =np.where(label_weight > 0)  # Calculate the SSC metric. Exculde the seen atmosphere and the invalid 255 area
             nonefree_pred = flat_pred[nonefree]
             nonefree_label = flat_label[nonefree]
 
@@ -127,12 +129,15 @@ class SegEvaluator(Evaluator):
         precision_sc = tp_sc / (tp_sc + fp_sc)
         recall_sc = tp_sc / (tp_sc + fn_sc)
         score_sc = [IOU_sc, precision_sc, recall_sc]
-
+        if self.runtime:
+           result_line, sscmIOU, sscPixel,scIOU,scPixel,scRecall = self.print_ssc_iou(score_sc, score_ssc)
+           return result_line,[sscmIOU, sscPixel,scIOU,scPixel,scRecall]
         result_line = self.print_ssc_iou(score_sc, score_ssc)
         return result_line
 
     def eval_ssc(self, img, disp, tsdf, depth_mapping_3d, sketch_gt, device=None):
         ori_rows, ori_cols, c = img.shape
+        
         input_data, input_disp = self.process_image_rgbd(img, disp, crop_size=None)
         score, bin_score, sketch_score = self.val_func_process_ssc(input_data, input_disp, tsdf, depth_mapping_3d, sketch_gt, device)
         score = score.permute(1, 2, 3, 0)       # h, w, z, c
@@ -140,7 +145,7 @@ class SegEvaluator(Evaluator):
 
         data_output = score.cpu().numpy()
         sketch_output = sketch_score.cpu().numpy()
-
+        
         pred = data_output.argmax(3)        # 60x36x60
         pred_sketch = sketch_output.argmax(3)
 
@@ -153,11 +158,11 @@ class SegEvaluator(Evaluator):
         input_disp = np.ascontiguousarray(input_disp[None, :, :, :], dtype=np.float32)
         input_disp = torch.FloatTensor(input_disp).cuda(device)
 
-        # print(input_mapping.shape, 'hhhhhhhh')
         input_mapping = np.ascontiguousarray(input_mapping[None, :], dtype=np.int32)
         input_mapping = torch.LongTensor(input_mapping).cuda(device)
 
-        tsdf = np.ascontiguousarray(tsdf[None, :], dtype=np.float32)
+        tsdf = np.ascontiguousarray(tsdf[None, :], dtype=np
+        .float32)
         tsdf = torch.FloatTensor(tsdf).cuda(device)
 
         with torch.cuda.device(input_data.get_device()):
@@ -192,20 +197,44 @@ class SegEvaluator(Evaluator):
 
         line = "\n".join(lines)
         print(line)
+        if self.runtime:
+            sscmIOU = ssc[2]
+            sscPixel = ssc[3]
+            scIOU = sc[0]
+            scPixel = sc[1]
+            scRecall = sc[2]
+            return line,sscmIOU, sscPixel,scIOU,scPixel,scRecall
         return line
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-e', '--epochs', default='last', type=str)
+    parser.add_argument('--snapshot-dir', default='idontexist', type=str)
     parser.add_argument('-d', '--devices', default='1', type=str)
     parser.add_argument('-v', '--verbose', default=False, action='store_true')
     parser.add_argument('--show_image', '-s', default=False,
                         action='store_true')
     parser.add_argument('--save_path', '-p', default='results')
+    parser.add_argument('--lr', type=float,
+                       default=0.1,
+                       dest="lr",
+                   help='Learning rate for experiments')
+    parser.add_argument('--ew', type=float,
+                       default=1.0,
+                       dest="ew",
+                       help='Empty voxel weight for experiments')
+    parser.add_argument('--num_epochs', type=int,
+                       default=250,
+                       dest="num_epochs",
+                        help='Number of epochs to train for experiments')
+    parser.add_argument('--only_frustum', dest='only_frustum', type=bool,default=False)
+    parser.add_argument('--only_boxes', dest='only_boxes', type=bool,default=False)
+    parser.add_argument('--dataset',type=str,default="NYUv2",dest='dataset')
 
     args = parser.parse_args()
     all_dev = parse_devices(args.devices)
 
+    update_parameters_in_config(config,ew=args.ew,lr=args.lr,num_epochs=args.num_epochs,only_frustum=args.only_frustum,only_boxes=args.only_boxes,dataset=args.dataset)
     network = Network(class_num=config.num_classes, feature=128, bn_momentum=config.bn_momentum,
                 norm_layer=nn.BatchNorm3d, eval=True)
     data_setting = {'img_root': config.img_root_folder,
@@ -213,9 +242,13 @@ if __name__ == "__main__":
                     'hha_root':config.hha_root_folder,
                     'mapping_root': config.mapping_root_folder,
                     'train_source': config.train_source,
-                    'eval_source': config.eval_source}
+                    'eval_source': config.eval_source,
+                    'dataset_path': config.dataset_path}
     val_pre = ValPre()
-    dataset = NYUv2(data_setting, 'val', val_pre)
+    if args.dataset == "scannet":
+      dataset = ScanNet(data_setting, 'val', val_pre,only_frustum=args.only_frustum,only_box=args.only_boxes)
+    else:
+      dataset = NYUv2(data_setting, 'val', val_pre)
 
     with torch.no_grad():
         segmentor = SegEvaluator(dataset, config.num_classes, config.image_mean,
@@ -223,5 +256,5 @@ if __name__ == "__main__":
                                  config.eval_scale_array, config.eval_flip,
                                  all_dev, args.verbose, args.save_path,
                                  args.show_image)
-        segmentor.run(config.snapshot_dir, args.epochs, config.val_log_file,
+        segmentor.run(args.snapshot_dir, args.epochs, config.val_log_file,
                       config.link_val_log_file)

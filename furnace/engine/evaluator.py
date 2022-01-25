@@ -17,7 +17,7 @@ logger = get_logger()
 class Evaluator(object):
     def __init__(self, dataset, class_num, image_mean, image_std, network,
                  multi_scales, is_flip, devices,
-                 verbose=False, save_path=None, show_image=False):
+                 verbose=False, save_path=None, show_image=False,runtime=False):
         self.eval_time = 0
         self.dataset = dataset
         self.ndata = self.dataset.get_length()
@@ -32,7 +32,7 @@ class Evaluator(object):
         self.context = mp.get_context('spawn')
         self.val_func = None
         self.results_queue = self.context.Queue(self.ndata)
-
+        self.runtime = runtime
         self.verbose = verbose
         self.save_path = save_path
         if save_path is not None:
@@ -46,59 +46,68 @@ class Evaluator(object):
             3.eval all epochs in a given section: -e start_epoch-end_epoch
             4.eval all epochs from a certain started epoch: -e start_epoch-
             """
-        if '.pth' in model_indice:
-            models = [model_indice, ]
-        elif "-" in model_indice:
-            start_epoch = int(model_indice.split("-")[0])
-            end_epoch = model_indice.split("-")[1]
+        if self.runtime == False:
+                
+            if '.pth' in model_indice:
+                models = [model_indice, ]
+            elif "-" in model_indice:
+                start_epoch = int(model_indice.split("-")[0])
+                end_epoch = model_indice.split("-")[1]
 
-            models = os.listdir(model_path)
-            models.remove("epoch-last.pth")
-            sorted_models = [None] * len(models)
-            model_idx = [0] * len(models)
+                models = os.listdir(model_path)
+                models.remove("epoch-last.pth")
+                sorted_models = [None] * len(models)
+                model_idx = [0] * len(models)
 
-            for idx, m in enumerate(models):
-                num = m.split(".")[0].split("-")[1]
-                model_idx[idx] = num
-                sorted_models[idx] = m
-            model_idx = np.array([int(i) for i in model_idx])
+                for idx, m in enumerate(models):
+                    num = m.split(".")[0].split("-")[1]
+                    model_idx[idx] = num
+                    sorted_models[idx] = m
+                model_idx = np.array([int(i) for i in model_idx])
 
-            down_bound = model_idx >= start_epoch
-            up_bound = [True] * len(sorted_models)
-            if end_epoch:
-                end_epoch = int(end_epoch)
-                assert start_epoch < end_epoch
-                up_bound = model_idx <= end_epoch
-            bound = up_bound * down_bound
-            model_slice = np.array(sorted_models)[bound]
-            models = [os.path.join(model_path, model) for model in
-                      model_slice]
-        else:
-            if os.path.exists(model_path):
-                models = [os.path.join(model_path,
-                                       'epoch-%s.pth' % model_indice), ]
+                down_bound = model_idx >= start_epoch
+                up_bound = [True] * len(sorted_models)
+                if end_epoch:
+                    end_epoch = int(end_epoch)
+                    assert start_epoch < end_epoch
+                    up_bound = model_idx <= end_epoch
+                bound = up_bound * down_bound
+                model_slice = np.array(sorted_models)[bound]
+                models = [os.path.join(model_path, model) for model in
+                        model_slice]
             else:
-                models = [None]
+                if os.path.exists(model_path):
+                    models = [os.path.join(model_path,
+                                        'epoch-%s.pth' % model_indice), ]
+                else:
+                    models = [None]
+            print(log_file)
+            results = open("dummy.txt", 'a')
+#            link_file(log_file, log_file_link)
 
-        results = open(log_file, 'a')
-        link_file(log_file, log_file_link)
-
-        for model in models:
-            logger.info("Load Model: %s" % model)
-            self.val_func = load_model(self.network, model)
+            for model in models:
+                logger.info("Load Model: %s" % model)
+                if self.val_func == None:
+                    self.val_func = load_model(self.network, model)
             #from IPython import embed; embed()
-            if len(self.devices ) == 1:
-                result_line = self.single_process_evalutation()
+        if len(self.devices ) == 1:
+            if self.runtime == False:
+                result_line,metrics  = self.single_process_evalutation()
             else:
-                result_line = self.multi_process_evaluation()
-
+                result_line,metrics,preds_to_ret  = self.single_process_evalutation()
+        else:
+            result_line= self.multi_process_evaluation() # returning results to log in runtime
+        if self.runtime == False:
             results.write('Model: ' + model + '\n')
             results.write(result_line)
             results.write('\n')
             results.flush()
 
-        results.close()
-
+            results.close()
+            return result_line
+        else:
+            return result_line,metrics,preds_to_ret
+        
     def single_process_evalutation(self):
         start_eval_time = time.perf_counter()
 
@@ -109,11 +118,19 @@ class Evaluator(object):
             dd = self.dataset[idx]
             results_dict = self.func_per_iteration(dd,self.devices[0])
             all_results.append(results_dict)
-        result_line = self.compute_metric(all_results)
+        if self.runtime:
+            result_line,metrics = self.compute_metric(all_results)
+        else:
+            result_line = self.compute_metric(all_results)
         logger.info(
             'Evaluation Elapsed Time: %.2fs' % (
                     time.perf_counter() - start_eval_time))
-        return result_line
+        if self.runtime == False:
+
+            return result_line
+        else:
+            preds_to_ret = all_results[:10]
+            return result_line,metrics, preds_to_ret
 
 
 
