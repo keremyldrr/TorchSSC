@@ -12,11 +12,11 @@ def get_points_inside_boxes(points, boxes):
     """[summary]
 
     Args:
-        points ([type]): [description]
-        boxes ([type]): [description]
+        points ([np.array]): [N x 3 point cloud]
+        boxes ([type]): [list of 8x3 boxes ]
 
     Returns:
-        [type]: [description]
+        [np.array]: [boolean mask for gettig the points inside given boxes\]
     """
     cond = np.zeros(len(points))
 
@@ -37,8 +37,10 @@ def get_inside_grid(pts, grid_shape):
     """[summary]
 
     Args:
-        pts ([type]): [description]
-        grid_shape ([type]): [description]
+        pts ([type]): [Point cloud in grid coordinates]
+        grid_shape ([type]): [Dimensions of the voxel grid]
+    Returns:
+        [np.array] : [boolean mask for filtering points that fall outside the grid]
     """
     xmask = (pts[:, 0] < grid_shape[0]) & (pts[:, 0] > 0)
     ymask = (pts[:, 1] < grid_shape[1]) & (pts[:, 1] > 0)
@@ -48,6 +50,15 @@ def get_inside_grid(pts, grid_shape):
 
 
 def export_grid(outname,resh,ignore=[255,0]):
+    """[Exports given grid to a point cloud]
+
+    Args:
+        outname ([str]): [Output file name]
+        resh ([np.array]): [3D Volume in grid representation]
+        ignore (list, optional): [values to ignore]. Defaults to [255,0].
+    Returns:
+        Grid as a point cloud and its colors
+    """
     pts = []
     colors = []
     grid_shape = resh.shape
@@ -86,7 +97,16 @@ def export_grid(outname,resh,ignore=[255,0]):
 
     
     a = trimesh.points.PointCloud(pts,colors).export(outname)
+
+    return np.array(pts),np.array(colors)
 def export_tsdf(outname,resh,ignore=[255,0]):
+    """[summary]
+    Same as export grid but for tsdf and only negative values. Does not return anything
+    Args:
+        outname ([type]): [description]
+        resh ([type]): [description]
+        ignore (list, optional): [description]. Defaults to [255,0].
+    """
     pts = []
     grid_shape = resh.shape
 #     resh = np.load("results_overfit_scannet_corrected/0000.npy").reshape(grid_shape)
@@ -102,15 +122,15 @@ def export_tsdf(outname,resh,ignore=[255,0]):
     a = trimesh.points.PointCloud(pts).export(outname)  
 
 def box_filter_label_mapping(boxes,VOX_SIZE,ptrans):
-    """[summary]
+    """[Converts the boxes from world coordinates to grid coordinates]
 
     Args:
-        boxes ([type]): [description]
+        boxes ([type]): [list of 8x3 boxes]
         VOX_SIZE ([type]): [description]
-        ptrans ([type]): [description]
+        ptrans ([type]): [translation vector to carry input pcd to center of the grid]
 
     Returns:
-        [type]: [description]
+        [type]: [New boxes in grid coords]
     """
     new_boxes = []
     for v in boxes:
@@ -120,10 +140,10 @@ def box_filter_label_mapping(boxes,VOX_SIZE,ptrans):
         new_boxes.append(v)
     return new_boxes
 def frame_to_grid(pts, grid_shape, VOX_SIZE):
-    """[summary]
+    """[Converts world coordinates to grid coordinates]
 
     Args:
-        pts ([type]): [description]
+        pts ([type]): [Nx3 point cloud]
         grid_shape ([type]): [description]
         VOX_SIZE ([type]): [description]
     """
@@ -136,12 +156,12 @@ def frame_to_grid(pts, grid_shape, VOX_SIZE):
 
 
 def get_mapping(pts, pts2d, grid_shape):
-    """[summary]
+    """[Computes the mapping of 3d points to image coordinates]
 
     Args:
-        pts ([type]): [description]
-        pts2d ([type]): [description]
-        grid_shape ([type]): [description]
+        pts ([type]): [3d points in grid coordinates]
+        pts2d ([type]): [   2d indices of 3d points]
+        grid_shape ([type]): [Shape of volume]
     """
     mapping = np.zeros(grid_shape) + 307200
     inside_grid_mask = get_inside_grid(pts, grid_shape)
@@ -151,13 +171,13 @@ def get_mapping(pts, pts2d, grid_shape):
 
     return mapping.flatten()
 def get_camera_pose(curr_pose):
-    """[summary]
+    """[reads the current camera pose from txt file]
 
     Args:
-        curr_pose ([type]): [description]
+        curr_pose ([type]): [pose filename]
 
     Returns:
-        [type]: [description]
+        [type]: [4x4 matrix for camera pose ]
     """
     camera_pose = pd.read_csv(curr_pose, header=None,
                               delimiter=" ").values[:, :-1]
@@ -165,12 +185,30 @@ def get_camera_pose(curr_pose):
 
 
 def get_grid_to_camera(camera_pose, axis_align_matrix):
+    """[Transformation from world coords to camera]
+
+    Args:
+        camera_pose ([type]): [description]
+        axis_align_matrix ([type]): [description]
+
+    Returns:
+        [type]: [4x4 transformation matrix]
+    """
     trns = np.matmul(np.linalg.inv(camera_pose),
                      np.linalg.inv(axis_align_matrix))
     return trns
 
 
 def get_axis_aligned_matrix(scene_name, scan_dir="/home/yildirir/workspace/votenet/scannet/scans/"):
+    """[Reads axis align matrix from scene metadata]
+
+    Args:
+        scene_name ([type]): [description]
+        scan_dir (str, optional): [description]. Defaults to "/home/yildirir/workspace/votenet/scannet/scans/".
+
+    Returns:
+        [type]: [The axis align matrix]
+    """
     # scan_dir = "/home/yildirir/workspace/votenet/scannet/scans/" #get this from config
 
     scan_path = os.path.join(scan_dir, scene_name)
@@ -189,8 +227,13 @@ def get_axis_aligned_matrix(scene_name, scan_dir="/home/yildirir/workspace/voten
 
 
 def get_color_extrinsic(scene_name, scan_dir="/home/yildirir/workspace/votenet/scannet/scans/"):
-    scan_dir = "/home/yildirir/workspace/votenet/scannet/scans/"  # get this from config
+    # scan_dir = "/home/yildirir/workspace/votenet/scannet/scans/"  # get this from config
+    """[Returns the color extrinsic matrix from the metadata]
 
+    Args:
+        scene_name ([type]): [description]
+        scan_dir (str, optional): [description]. Defaults to "/home/yildirir/workspace/votenet/scannet/scans/".
+    """
     scan_path = os.path.join(scan_dir, scene_name)
     meta_file = os.path.join(scan_path, "{}.txt".format(scene_name))
 
@@ -204,6 +247,15 @@ def get_color_extrinsic(scene_name, scan_dir="/home/yildirir/workspace/votenet/s
 
 
 def get_instance_boxes(instancedir, thresh=0.3):
+    """[Reads the instance boxes from dataset, filter by threshold]
+
+    Args:
+        instancedir ([type]): [description]
+        thresh (float, optional): [description]. Defaults to 0.3.
+
+    Returns:
+        [type]: [description]
+    """
     instances = np.array(sorted(os.listdir(instancedir)))
     scores = np.array([float(a[:-4].split("_")[5]) for a in instances])
     boxes = [trimesh.load(os.path.join(
@@ -212,6 +264,15 @@ def get_instance_boxes(instancedir, thresh=0.3):
 
 
 def get_pcd_from_depth(depth_image, depth_intrinsic):
+    """[Vectorized computation of point cloud from given depth image and camera matrix]
+
+    Args:
+        depth_image ([type]): [description]
+        depth_intrinsic ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     img_inds = np.indices(depth_image.shape).reshape(2, -1).T
     depth_structure = np.zeros([307200, 3])
     depths = depth_image[img_inds[:, 0], img_inds[:, 1]]
@@ -225,12 +286,19 @@ def get_pcd_from_depth(depth_image, depth_intrinsic):
 
 
 def tsdf_from_depth(grid_shape, VOX_SIZE, TRUNCATION, depth_intrinsic, depth_image, worldToCam, translate, upshift=0):
+    """[TSDF computation from given input depth image]
+
+    Args:
+        grid_shape ([type]): [description]
+        VOX_SIZE ([type]): [description]
+        TRUNCATION ([type]): [description]
+        depth_intrinsic ([type]): [description]
+        depth_image ([type]): [description]
+        worldToCam ([type]): [description]
+        translate ([type]): [description]
+        upshift (int, optional): [description]. Defaults to 0.
     """
 
-
-
-    Explain parameters here
-    """
     grid_inds = (np.indices(grid_shape).reshape(3, -1).T)
     grid = np.zeros(np.product(grid_shape))
 #     print(translate)
@@ -320,6 +388,18 @@ def tsdf_from_depth(grid_shape, VOX_SIZE, TRUNCATION, depth_intrinsic, depth_ima
 
 
 def project_rgb_to_depth(curr_rgb_img, color_intrinsic, depth_intrinsic, depth_img, colorToDepthExtr):
+    """[Projects rgb image to depth image using color intrinsics]
+
+    Args:
+        curr_rgb_img ([type]): [description]
+        color_intrinsic ([type]): [description]
+        depth_intrinsic ([type]): [description]
+        depth_img ([type]): [description]
+        colorToDepthExtr ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     rgb_dh, rgb_dw, _ = curr_rgb_img.shape
     dh, dw = depth_img.shape
     rgb_image_inds = np.indices([rgb_dh, rgb_dw]).reshape(2, -1).T
@@ -356,6 +436,16 @@ def represents_int(s):
 
 
 def read_label_mapping(filename, label_from='raw_category', label_to='nyu40id'):
+    """utility for scannet data reading
+
+    Args:
+        filename ([type]): [description]
+        label_from (str, optional): [description]. Defaults to 'raw_category'.
+        label_to (str, optional): [description]. Defaults to 'nyu40id'.
+
+    Returns:
+        [type]: [description]
+    """
     assert os.path.isfile(filename)
     mapping = dict()
     with open(filename) as csvfile:
@@ -368,6 +458,14 @@ def read_label_mapping(filename, label_from='raw_category', label_to='nyu40id'):
 
 
 def read_segmentation(filename):
+    """[Reads segmentation information for given scene]
+
+    Args:
+        filename ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     assert os.path.isfile(filename)
     seg_to_verts = {}
     with open(filename) as f:
@@ -383,6 +481,14 @@ def read_segmentation(filename):
 
 
 def read_aggregation(filename):
+    """Reads aggregation file. From Votenet
+
+    Args:
+        filename ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     assert os.path.isfile(filename)
     object_id_to_segs = {}
     label_to_segs = {}
@@ -435,6 +541,14 @@ def read_mesh_vertices_rgb(filename):
 
 
 def read_scan_properties(scan_path, scene_name, label_map, axis_align_matrix):
+    """reads all the info for desired scan
+
+    Args:
+        scan_path ([type]): [description]
+        scene_name ([type]): [description]
+        label_map ([type]): [description]
+        axis_align_matrix ([type]): [description]
+    """
     scene_mesh = read_mesh_vertices_rgb(os.path.join(
         scan_path, "{}_vh_clean_2.ply".format(scene_name)))
     colors = scene_mesh[:, 3:]
@@ -467,9 +581,21 @@ def read_scan_properties(scan_path, scene_name, label_map, axis_align_matrix):
 
 
 def get_frustrum(intrinsics, dw, dh, pose_matrix, axis_align_matrix):
+    """Returns camera frustum given image dimensions and camera pose
+
+    Args:
+        intrinsics ([type]): [description]
+        dw ([type]): [description]
+        dh ([type]): [description]
+        pose_matrix ([type]): [description]
+        axis_align_matrix ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     d = 3
     frustrum = []
-    frustrum.append(np.matmul(intrinsics[:3, :3], np.array([0, 0, 0])))
+    frustrum.append(np.matmul(intrinsics[:, :3], np.array([0, 0, 0])))
 
     frustrum.append(np.matmul(intrinsics[:3, :3], np.array([0, 0, d])))
     frustrum.append(np.matmul(intrinsics[:3, :3], np.array([0, dh * d, d])))

@@ -553,6 +553,7 @@ class Evaluator(object):
             p_img = np.concatenate((im_b, im_g, im_r), axis=2)
     
         p_img = normalize(p_img, self.image_mean, self.image_std)
+        
         if len(disp.shape) == 2:
             p_disp = normalize(p_disp, 0, 1)
         else:

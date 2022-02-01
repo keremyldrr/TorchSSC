@@ -28,7 +28,7 @@ def update_logpath_in_config(C,log):
     C.val_log_file = C.log_dir + '/_' + exp_time + '.lovalg'
     C.link_val_log_file = C.log_dir + '/val_last.log'
     
-def update_parameters_in_config(C,lr=0.1,ew=1,num_epochs=200,only_frustum=False,only_boxes=False,dataset="NYUv2"):
+def update_parameters_in_config(C,lr=0.1,ew=1,num_epochs=200,only_frustum=False,only_boxes=False,dataset="NYUv2",prefix=""):
 
 
 
@@ -65,6 +65,8 @@ def update_parameters_in_config(C,lr=0.1,ew=1,num_epochs=200,only_frustum=False,
         C.dataset_path = osp.join(C.volna, 'DATA/ScanNet/')
         C.train_source = osp.join(C.dataset_path, "train_subset.txt")
         C.eval_source = osp.join(C.dataset_path, "val_subset.txt")
+        C.train_source = osp.join(C.dataset_path, "train_frames.txt")
+        C.eval_source = osp.join(C.dataset_path, "val_frames.txt")
         C.dataset = "ScanNet"
         C.num_classes = 19
         C.image_mean = np.array([109.8, 97.2, 83.8])/255
@@ -99,7 +101,7 @@ def update_parameters_in_config(C,lr=0.1,ew=1,num_epochs=200,only_frustum=False,
     C.batch_size = 2
     C.nepochs = 250
     C.niters_per_epoch = C.num_train_imgs//C.batch_size 
-    C.num_workers = C.batch_size
+    C.num_workers = 0#C.batch_size
 
     C.train_scale_array = [1]
     C.warm_up_epoch = 0
@@ -129,7 +131,7 @@ def update_parameters_in_config(C,lr=0.1,ew=1,num_epochs=200,only_frustum=False,
     C.niters_per_epoch = C.num_train_imgs//C.batch_size     
     C.only_frustum=only_frustum
     C.only_boxes=only_boxes
-    logdir = "logs/{}_ew_{}_lr_{}_of_{}_ob_{}".format(dataset,ew,lr,int(only_frustum),int(only_boxes))
+    logdir = "logs/{}_{}_ew_{}_lr_{}_of_{}_ob_{}".format(prefix,dataset,ew,lr,int(only_frustum),int(only_boxes))
     update_logpath_in_config(C,logdir)
     
 

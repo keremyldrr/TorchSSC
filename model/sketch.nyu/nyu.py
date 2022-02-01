@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # encoding: utf-8
 import numpy as np
@@ -6,13 +7,12 @@ from datasets.BaseDataset import BaseDataset
 import os
 import cv2
 import io
-from config import config
 from io import BytesIO
 
 
 class NYUv2(BaseDataset):
     def __init__(self, setting, split_name, preprocess=None,
-                 file_length=None, s3client=None):
+                 file_length=None, s3client=None,only_frustum=False, only_box=False):
         super(NYUv2, self).__init__(setting, split_name, preprocess, file_length)
         self._split_name = split_name
         self._img_path = setting['img_root']
@@ -25,6 +25,8 @@ class NYUv2(BaseDataset):
         self._file_length = file_length
         self.preprocess = preprocess
         self.s3client = s3client
+        self.only_frustum = only_frustum
+        self.only_box = only_box
 
     def read_ceph_img(self, mode, value):
         img_array = np.fromstring(value, dtype=np.uint8)
@@ -99,6 +101,7 @@ class NYUv2(BaseDataset):
             depth_mapping_3d = torch.from_numpy(np.ascontiguousarray(depth_mapping_3d)).long()
 
             label_weight = torch.from_numpy(np.ascontiguousarray(label_weight)).float()
+            # label_weight = torch.ones_like(label_weight).float() #added by kerem
             tsdf = torch.from_numpy(np.ascontiguousarray(tsdf)).float()
 
             if self.preprocess is not None and extra_dict is not None:
@@ -117,17 +120,20 @@ class NYUv2(BaseDataset):
         return output_dict
 
     def _fetch_data(self, img_path, hha_path, label_weight_path, mapping_path, gt_path, dtype=None):
-        from config import config
-
         img = np.array(cv2.imread(img_path), dtype=np.float32)
         hha = np.array(cv2.imread(hha_path), dtype=np.float32)
-        tsdf = np.load(label_weight_path)['arr_0'].astype(np.float32).reshape(1, 60, 36, 60)
+        tsdf = np.load(label_weight_path)['arr_0'].astype(np.float32)
         label_weight = np.load(label_weight_path)['arr_1'].astype(np.float32)
         depth_mapping_3d = np.load(mapping_path)['arr_0'].astype(np.int64)
         gt = np.load(gt_path)['arr_0'].astype(np.int64)
         sketch_gt = np.load(gt_path.replace('Label', 'sketch3D').replace('npz', 'npy')).astype(np.int64)
-
-        return img, hha, tsdf, label_weight, depth_mapping_3d, gt, sketch_gt
+        if self.only_frustum:
+            print("Only FRUSTUM!!!!")
+        else:
+            label_weight = np.ones_like(label_weight)
+            print("Full scene!!!!")
+        
+        return img, hha, tsdf.reshape(1, 60, 36, 60), label_weight, depth_mapping_3d, gt, sketch_gt.reshape(1, 60, 36, 60)
 
     @classmethod
     def get_class_colors(*args):

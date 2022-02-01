@@ -8,6 +8,7 @@ ob=${ob:-}
 port=${port:- 10097 }
 dataset=${dataset:- NYUv2 }
 cp=${cp:- }
+prefix=${prefix:- dummy}
 while [ $# -gt 0 ]; do
 
    if [[ $1 == *"--"* ]]; then
@@ -19,7 +20,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 export NGPUS=$ngpus
-export CUDA_VISIBLE_DEVICES=$gpus
-echo python -m torch.distributed.launch --nproc_per_node=$NGPUS train.py -p $port --lr $lr --ew $ew   $of $ob --dataset $dataset  --num_epochs $nepoch $cp #-c log/snapshot/last.pt
+# export CUDA_VISIBLE_DEVICES=$gpus
+echo python -m torch.distributed.launch --nproc_per_node=$NGPUS train.py -p $port --lr $lr --ew $ew   $of $ob --dataset $dataset  --num_epochs $nepoch $cp  --prefix $prefix #-c log/snapshot/last.pt
 
-python -m torch.distributed.launch --nproc_per_node=$NGPUS train.py -p $port --lr $lr --ew $ew   $of $ob --dataset $dataset  --num_epochs $nepoch $cp #-c log/snapshot/last.pt
+
+python -m torch.distributed.launch --nproc_per_node=$NGPUS train.py -p $port --lr $lr --ew $ew   $of $ob --dataset $dataset  --num_epochs $nepoch $cp  --prefix $prefix #-c log/snapshot/last.pt

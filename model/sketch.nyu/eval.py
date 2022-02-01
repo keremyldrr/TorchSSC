@@ -28,7 +28,8 @@ logger = get_logger()
 
 default_collate_func = dataloader.default_collate
 
-
+torch.manual_seed(31)
+np.random.seed(31)
 def default_collate_override(batch):
   dataloader._use_shared_memory = False
   return default_collate_func(batch)
@@ -139,6 +140,8 @@ class SegEvaluator(Evaluator):
         ori_rows, ori_cols, c = img.shape
         
         input_data, input_disp = self.process_image_rgbd(img, disp, crop_size=None)
+        print(input_data.sum(),input_disp.sum(),tsdf.sum(),depth_mapping_3d.sum(),sketch_gt.sum())
+
         score, bin_score, sketch_score = self.val_func_process_ssc(input_data, input_disp, tsdf, depth_mapping_3d, sketch_gt, device)
         score = score.permute(1, 2, 3, 0)       # h, w, z, c
         sketch_score = sketch_score.permute(1, 2, 3, 0)
@@ -169,7 +172,7 @@ class SegEvaluator(Evaluator):
             self.val_func.eval()
             self.val_func.to(input_data.get_device())
             with torch.no_grad():
-                score, bin_score, sketch_score = self.val_func(input_data, input_mapping, tsdf)
+                score, bin_score, sketch_score = self.val_func(input_data.float(), input_mapping.long(), tsdf.float())
                 score = score[0]
                 sketch_score = sketch_score[0]
 

@@ -177,7 +177,9 @@ class CVAE(nn.Module):
         if self.training:
             gt = gt.view(b, 1, h, w, l).float()
             for_encoder = torch.cat([x, gt], dim=1)
+            # print(x.sum())
             enc = self.encoder(for_encoder)
+           
             pred_mean = self.mean(enc)
             pred_log_var = self.log_var(enc)
 
@@ -201,7 +203,6 @@ class CVAE(nn.Module):
             sketch = torch.mean(sketch, dim=0)
             sketch_gsnn = torch.cat([torch.unsqueeze(out_sample, dim=0) for out_sample in out_samples_gsnn])
             sketch_gsnn = torch.mean(sketch_gsnn, dim=0)
-
             return pred_mean, pred_log_var, sketch_gsnn, sketch
         else:
             out_samples = []
@@ -300,7 +301,6 @@ class STAGE1(nn.Module):
 
         _, pred_sketch_binary = torch.max(pred_sketch_raw, dim=1, keepdim=True)        # (b, 1, 60, 36, 60) binary-voxel sketch
         pred_mean, pred_log_var, pred_sketch_gsnn, pred_sketch= self.cvae(pred_sketch_binary.float(), sketch_gt)
-
         return pred_sketch_raw, pred_sketch_gsnn, pred_sketch, pred_mean, pred_log_var
 
 
@@ -417,10 +417,9 @@ class STAGE2(nn.Module):
 
         zerosVec = torch.zeros(b, 1, c).cuda()  # for voxels that could not be projected from the depth map, we assign them zero vector
         segVec = torch.cat((feature2d, zerosVec), 1)
-
         segres = [torch.index_select(segVec[i], 0, depth_mapping_3d[i]) for i in range(b)]
         segres = torch.stack(segres).permute(0, 2, 1).contiguous().view(b, c, 60, 36, 60)  # B, (channel), 60, 36, 60
-
+        
         '''
         init the 3D feature
         '''
@@ -483,7 +482,7 @@ class Network(nn.Module):
         h, w = rgb.size(2), rgb.size(3)
 
         feature2d = self.backbone(rgb)
-
+        # print(tsdf.shape)
         pred_sketch_raw, pred_sketch_gsnn, pred_sketch, pred_mean, pred_log_var = self.stage1(tsdf, depth_mapping_3d, sketch_gt)
         pred_semantic, _ = self.stage2(feature2d, depth_mapping_3d, pred_sketch_raw,
                                                                 pred_sketch_gsnn)

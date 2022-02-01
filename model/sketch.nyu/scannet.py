@@ -27,7 +27,7 @@ class ScanNet(BaseDataset):
         self._train_source = setting['train_source']
         self._eval_source = setting['eval_source']
         self._file_names = self._get_file_names(split_name)
-        self._file_length = file_length
+        self._file_length = len(self._file_names) if file_length is not None else file_length
         self.preprocess = preprocess
         self.s3client = s3client
         self.only_frustum = only_frustum
@@ -81,7 +81,11 @@ class ScanNet(BaseDataset):
         # if self._file_length is not None:
         #     names = self._construct_new_file_names(self._file_length)[index]
         # else:
+        # print(index,len(self._file_names))
+        # if self._split_name is "val":
+        #     print("idx",index)
         names = self._file_names[index]
+        
 
         item_idx = names[0]
         scene_name = item_idx[:item_idx.rfind("_")]
@@ -119,22 +123,22 @@ class ScanNet(BaseDataset):
         if self.preprocess is not None:
             img, extra_dict = self.preprocess(img, hha)         # normalization
 
-        if self._split_name is 'train':
-            img = torch.from_numpy(np.ascontiguousarray(img)).float()
-            gt = torch.from_numpy(np.ascontiguousarray(gt)).long()
-            sketch_gt = torch.from_numpy(np.ascontiguousarray(sketch_gt)).long()
-            depth_mapping_3d = torch.from_numpy(np.ascontiguousarray(depth_mapping_3d)).long()
+        # if self._split_name is 'train':
+        #     img = torch.from_numpy(np.ascontiguousarray(img)).float()
+        #     gt = torch.from_numpy(np.ascontiguousarray(gt)).long()
+        #     sketch_gt = torch.from_numpy(np.ascontiguousarray(sketch_gt)).long()
+        #     depth_mapping_3d = torch.from_numpy(np.ascontiguousarray(depth_mapping_3d)).long()
 
-            label_weight = torch.from_numpy(np.ascontiguousarray(label_weight)).float()
-            tsdf = torch.from_numpy(np.ascontiguousarray(tsdf)).float()
+        #     label_weight = torch.from_numpy(np.ascontiguousarray(label_weight)).float()
+        #     tsdf = torch.from_numpy(np.ascontiguousarray(tsdf)).float()
 
-            if self.preprocess is not None and extra_dict is not None:
-                for k, v in extra_dict.items():
-                    extra_dict[k] = torch.from_numpy(np.ascontiguousarray(v))
-                    if 'label' in k:
-                        extra_dict[k] = extra_dict[k].long()
-                    if 'img' in k:
-                        extra_dict[k] = extra_dict[k].float()
+        #     if self.preprocess is not None and extra_dict is not None:
+        #         for k, v in extra_dict.items():
+        #             extra_dict[k] = torch.from_numpy(np.ascontiguousarray(v))
+        #             if 'label' in k:
+        #                 extra_dict[k] = extra_dict[k].long()
+        #             if 'img' in k:
+        #                 extra_dict[k] = extra_dict[k].float()
 
         output_dict = dict(data=img, label=gt, label_weight=label_weight, depth_mapping_3d=depth_mapping_3d,
                            tsdf=tsdf, sketch_gt=sketch_gt, fn=str(item_name), n=len(self._file_names))
@@ -212,7 +216,7 @@ class ScanNet(BaseDataset):
             label_weight = grid_mask.astype(int)
         # sketch_gt = np.load(gt_path.replace('Label', 'sketch3D').replace('npz', 'npy')).astype(np.int64)
         # sketch_gt[tsdf==0]=0
-        return img, hha, tsdf.reshape(1, 60, 36, 60), label_weight, depth_mapping_3d, gt, sketch_gt[0]
+        return img, hha, tsdf.reshape(1,60, 36, 60), label_weight, depth_mapping_3d, gt, sketch_gt[0]
 
     @classmethod
     def get_class_colors(*args):

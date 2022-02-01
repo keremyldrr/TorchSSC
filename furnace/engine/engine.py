@@ -90,6 +90,10 @@ class Engine(object):
                        default='log',
                        dest="logdir",
                        help='Logging directory for experiments')
+        p.add_argument('--prefix', type=str,
+                       default='',
+                       dest="prefix",
+                       help='Prefix')
         p.add_argument('--lr', type=float,
                        default=0.1,
                        dest="lr",
@@ -146,12 +150,13 @@ class Engine(object):
         link_file(source, target)
 
 
-    def save_and_link_checkpoint(self, snapshot_dir, log_dir, log_dir_link):
+    def save_and_link_checkpoint(self, snapshot_dir, log_dir, log_dir_link,iter_num=""):
         ensure_dir(snapshot_dir)
         if not osp.exists(log_dir_link):
             link_file(log_dir, log_dir_link)
-        current_epoch_checkpoint = osp.join(snapshot_dir, 'epoch-{}.pth'.format(
-            self.state.epoch))
+        current_epoch_checkpoint =  osp.join(snapshot_dir, 'epoch-{}.pth'.format(
+            self.state.epoch)) if not iter_num else osp.join(snapshot_dir, 'iter-{}.pth'.format(
+            iter_num))
         self.save_checkpoint(current_epoch_checkpoint)
         last_epoch_checkpoint = osp.join(snapshot_dir,
                                          'epoch-last.pth')
