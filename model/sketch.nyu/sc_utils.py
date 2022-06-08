@@ -8,6 +8,24 @@ import pandas as pd
 import json
 
 
+def get_label_bbox(label,grid_shape):
+    nonzero_label = np.argwhere((label.reshape(grid_shape) != 0))
+    xmax,ymax,zmax=nonzero_label.max(0)
+    xmin,ymin,zmin=nonzero_label.min(0)
+    cornerpts = np.array([ [xmin,ymin,  zmin],
+                  [xmin,ymin, zmax],
+                  [xmin,ymax,  zmax],
+                  [xmin,ymax,zmin],
+                [xmax,ymax,  zmax],
+                  [xmax,ymin,  zmin],
+                  [xmax,ymax,  zmin],
+                  [xmax,ymin,zmax]])
+    grid_inds = (np.indices(grid_shape).reshape(3, -1).T)
+
+    cond = get_points_inside_boxes(grid_inds,[cornerpts])
+    label[cond == False] = 255 
+    return label
+
 def get_points_inside_boxes(points, boxes):
     """[summary]
 
@@ -19,8 +37,8 @@ def get_points_inside_boxes(points, boxes):
         [np.array]: [boolean mask for gettig the points inside given boxes\]
     """
     cond = np.zeros(len(points))
-
     for box in boxes:
+        
         maxx, maxy, maxz = box.max(0)
 
         minx, miny, minz = box.min(0)

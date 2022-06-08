@@ -31,29 +31,63 @@ class SimpleRB(nn.Module):
         return out
 
 
-'''
+"""
 3D Residual Block，3x3x3 conv ==> 3 smaller 3D conv, refered from DDRNet
-'''
-class Bottleneck3D(nn.Module):
+"""
 
-    def __init__(self, inplanes, planes, norm_layer, stride=1, dilation=[1, 1, 1], expansion=4, downsample=None,
-                 fist_dilation=1, multi_grid=1,
-                 bn_momentum=0.0003):
+
+class Bottleneck3D(nn.Module):
+    def __init__(
+        self,
+        inplanes,
+        planes,
+        norm_layer,
+        stride=1,
+        dilation=[1, 1, 1],
+        expansion=4,
+        downsample=None,
+        fist_dilation=1,
+        multi_grid=1,
+        bn_momentum=0.0003,
+    ):
         super(Bottleneck3D, self).__init__()
         # often，planes = inplanes // 4
         self.expansion = expansion
         self.conv1 = nn.Conv3d(inplanes, planes, kernel_size=1, bias=False)
         self.bn1 = norm_layer(planes, momentum=bn_momentum)
-        self.conv2 = nn.Conv3d(planes, planes, kernel_size=(1, 1, 3), stride=(1, 1, stride),
-                               dilation=(1, 1, dilation[0]), padding=(0, 0, dilation[0]), bias=False)
+        self.conv2 = nn.Conv3d(
+            planes,
+            planes,
+            kernel_size=(1, 1, 3),
+            stride=(1, 1, stride),
+            dilation=(1, 1, dilation[0]),
+            padding=(0, 0, dilation[0]),
+            bias=False,
+        )
         self.bn2 = norm_layer(planes, momentum=bn_momentum)
-        self.conv3 = nn.Conv3d(planes, planes, kernel_size=(1, 3, 1), stride=(1, stride, 1),
-                               dilation=(1, dilation[1], 1), padding=(0, dilation[1], 0), bias=False)
+        self.conv3 = nn.Conv3d(
+            planes,
+            planes,
+            kernel_size=(1, 3, 1),
+            stride=(1, stride, 1),
+            dilation=(1, dilation[1], 1),
+            padding=(0, dilation[1], 0),
+            bias=False,
+        )
         self.bn3 = norm_layer(planes, momentum=bn_momentum)
-        self.conv4 = nn.Conv3d(planes, planes, kernel_size=(3, 1, 1), stride=(stride, 1, 1),
-                               dilation=(dilation[2], 1, 1), padding=(dilation[2], 0, 0), bias=False)
+        self.conv4 = nn.Conv3d(
+            planes,
+            planes,
+            kernel_size=(3, 1, 1),
+            stride=(stride, 1, 1),
+            dilation=(dilation[2], 1, 1),
+            padding=(dilation[2], 0, 0),
+            bias=False,
+        )
         self.bn4 = norm_layer(planes, momentum=bn_momentum)
-        self.conv5 = nn.Conv3d(planes, planes * self.expansion, kernel_size=(1, 1, 1), bias=False)
+        self.conv5 = nn.Conv3d(
+            planes, planes * self.expansion, kernel_size=(1, 1, 1), bias=False
+        )
         self.bn5 = norm_layer(planes * self.expansion, momentum=bn_momentum)
 
         self.relu = nn.ReLU(inplace=False)
@@ -108,10 +142,13 @@ class Bottleneck3D(nn.Module):
 
         return out_relu
 
-'''
+
+"""
 Input: 60*36*60 sketch
 Latent code: 15*9*15
-'''
+"""
+
+
 class CVAE(nn.Module):
     def __init__(self, norm_layer, bn_momentum, latent_size=16):
         super(CVAE, self).__init__()
@@ -131,14 +168,19 @@ class CVAE(nn.Module):
             norm_layer(self.latent_size, momentum=bn_momentum),
             nn.ReLU(),
             nn.AvgPool3d(kernel_size=2, stride=2),
-            nn.Conv3d(self.latent_size, self.latent_size, kernel_size=3, padding=1, bias=False),
+            nn.Conv3d(
+                self.latent_size, self.latent_size, kernel_size=3, padding=1, bias=False
+            ),
             norm_layer(self.latent_size, momentum=bn_momentum),
             nn.ReLU(),
         )
 
-        self.mean = nn.Conv3d(self.latent_size, self.latent_size, kernel_size=1, bias=True)      # predict mean.
-        self.log_var = nn.Conv3d(self.latent_size, self.latent_size, kernel_size=1, bias=True)     # predict log(var).
-
+        self.mean = nn.Conv3d(
+            self.latent_size, self.latent_size, kernel_size=1, bias=True
+        )  # predict mean.
+        self.log_var = nn.Conv3d(
+            self.latent_size, self.latent_size, kernel_size=1, bias=True
+        )  # predict log(var).
 
         self.decoder_x = nn.Sequential(
             nn.Conv3d(1, 3, kernel_size=3, padding=1, bias=False),
@@ -155,20 +197,38 @@ class CVAE(nn.Module):
             norm_layer(self.latent_size, momentum=bn_momentum),
             nn.ReLU(),
             nn.AvgPool3d(kernel_size=2, stride=2),
-            nn.Conv3d(self.latent_size, self.latent_size, kernel_size=3, padding=1, bias=False),
+            nn.Conv3d(
+                self.latent_size, self.latent_size, kernel_size=3, padding=1, bias=False
+            ),
             norm_layer(self.latent_size, momentum=bn_momentum),
             nn.ReLU(),
         )
 
         self.decoder = nn.Sequential(
-            nn.ConvTranspose3d(self.latent_size*2, self.latent_size, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1),
+            nn.ConvTranspose3d(
+                self.latent_size * 2,
+                self.latent_size,
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                dilation=1,
+                output_padding=1,
+            ),
             norm_layer(self.latent_size, momentum=bn_momentum),
             nn.ReLU(inplace=False),
-            nn.ConvTranspose3d(self.latent_size, self.latent_size, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1),
+            nn.ConvTranspose3d(
+                self.latent_size,
+                self.latent_size,
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                dilation=1,
+                output_padding=1,
+            ),
             norm_layer(self.latent_size, momentum=bn_momentum),
             nn.ReLU(inplace=False),
             nn.Dropout3d(0.1),
-            nn.Conv3d(self.latent_size, 2, kernel_size=1, bias=True)
+            nn.Conv3d(self.latent_size, 2, kernel_size=1, bias=True),
         )
 
     def forward(self, x, gt=None):
@@ -177,9 +237,7 @@ class CVAE(nn.Module):
         if self.training:
             gt = gt.view(b, 1, h, w, l).float()
             for_encoder = torch.cat([x, gt], dim=1)
-            # print(x.sum())
             enc = self.encoder(for_encoder)
-           
             pred_mean = self.mean(enc)
             pred_log_var = self.log_var(enc)
 
@@ -199,10 +257,15 @@ class CVAE(nn.Module):
                 sketch_gsnn = self.decoder(torch.cat([decoder_x, z2], dim=1))
                 out_samples_gsnn.append(sketch_gsnn)
 
-            sketch = torch.cat([torch.unsqueeze(out_sample, dim=0) for out_sample in out_samples])
+            sketch = torch.cat(
+                [torch.unsqueeze(out_sample, dim=0) for out_sample in out_samples]
+            )
             sketch = torch.mean(sketch, dim=0)
-            sketch_gsnn = torch.cat([torch.unsqueeze(out_sample, dim=0) for out_sample in out_samples_gsnn])
+            sketch_gsnn = torch.cat(
+                [torch.unsqueeze(out_sample, dim=0) for out_sample in out_samples_gsnn]
+            )
             sketch_gsnn = torch.mean(sketch_gsnn, dim=0)
+
             return pred_mean, pred_log_var, sketch_gsnn, sketch
         else:
             out_samples = []
@@ -211,13 +274,26 @@ class CVAE(nn.Module):
                 decoder_x = self.decoder_x(x)
                 out = self.decoder(torch.cat([decoder_x, z], dim=1))
                 out_samples.append(out)
-            sketch_gsnn = torch.cat([torch.unsqueeze(out_sample, dim=0) for out_sample in out_samples])
+            sketch_gsnn = torch.cat(
+                [torch.unsqueeze(out_sample, dim=0) for out_sample in out_samples]
+            )
             sketch_gsnn = torch.mean(sketch_gsnn, dim=0)
             return None, None, sketch_gsnn, None
 
+
 class STAGE1(nn.Module):
-    def __init__(self, class_num, norm_layer, resnet_out=2048, feature=512, ThreeDinit=True,
-                 bn_momentum=0.1, pretrained_model=None, eval=False, freeze_bn=False):
+    def __init__(
+        self,
+        class_num,
+        norm_layer,
+        resnet_out=2048,
+        feature=512,
+        ThreeDinit=True,
+        bn_momentum=0.1,
+        pretrained_model=None,
+        eval=False,
+        freeze_bn=False,
+    ):
         super(STAGE1, self).__init__()
         self.business_layer = []
 
@@ -235,61 +311,131 @@ class STAGE1(nn.Module):
         self.business_layer.append(self.oper1)
 
         self.completion_layer1 = nn.Sequential(
-            Bottleneck3D(feature, feature // 4, bn_momentum=bn_momentum, expansion=4, stride=2, downsample=
-            nn.Sequential(
-                nn.AvgPool3d(kernel_size=2, stride=2),
-                nn.Conv3d(feature, feature,
-                          kernel_size=1, stride=1, bias=False),
-                norm_layer(feature, momentum=bn_momentum),
-                # nn.ReLU(),
-            ), norm_layer=norm_layer),  # feature --> feature*2
-            Bottleneck3D(feature, feature // 4, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[1, 1, 1]),
-            Bottleneck3D(feature, feature // 4, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[2, 2, 2]),
-            Bottleneck3D(feature, feature // 4, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[3, 3, 3]),
+            Bottleneck3D(
+                feature,
+                feature // 4,
+                bn_momentum=bn_momentum,
+                expansion=4,
+                stride=2,
+                downsample=nn.Sequential(
+                    nn.AvgPool3d(kernel_size=2, stride=2),
+                    nn.Conv3d(feature, feature, kernel_size=1, stride=1, bias=False),
+                    norm_layer(feature, momentum=bn_momentum),
+                    # nn.ReLU(),
+                ),
+                norm_layer=norm_layer,
+            ),  # feature --> feature*2
+            Bottleneck3D(
+                feature,
+                feature // 4,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[1, 1, 1],
+            ),
+            Bottleneck3D(
+                feature,
+                feature // 4,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[2, 2, 2],
+            ),
+            Bottleneck3D(
+                feature,
+                feature // 4,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[3, 3, 3],
+            ),
         )
         self.business_layer.append(self.completion_layer1)
 
         self.completion_layer2 = nn.Sequential(
-            Bottleneck3D(feature, feature // 4, bn_momentum=bn_momentum, expansion=8, stride=2, downsample=
-            nn.Sequential(
-                nn.AvgPool3d(kernel_size=2, stride=2),
-                nn.Conv3d(feature, feature * 2,
-                          kernel_size=1, stride=1, bias=False),
-                norm_layer(feature * 2, momentum=bn_momentum),
-                # nn.ReLU(),
-            ), norm_layer=norm_layer),
-            Bottleneck3D(feature * 2, feature // 2, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[1, 1, 1]),
-            Bottleneck3D(feature * 2, feature // 2, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[2, 2, 2]),
-            Bottleneck3D(feature * 2, feature // 2, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[3, 3, 3]),
+            Bottleneck3D(
+                feature,
+                feature // 4,
+                bn_momentum=bn_momentum,
+                expansion=8,
+                stride=2,
+                downsample=nn.Sequential(
+                    nn.AvgPool3d(kernel_size=2, stride=2),
+                    nn.Conv3d(
+                        feature, feature * 2, kernel_size=1, stride=1, bias=False
+                    ),
+                    norm_layer(feature * 2, momentum=bn_momentum),
+                    # nn.ReLU(),
+                ),
+                norm_layer=norm_layer,
+            ),
+            Bottleneck3D(
+                feature * 2,
+                feature // 2,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[1, 1, 1],
+            ),
+            Bottleneck3D(
+                feature * 2,
+                feature // 2,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[2, 2, 2],
+            ),
+            Bottleneck3D(
+                feature * 2,
+                feature // 2,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[3, 3, 3],
+            ),
         )
         self.business_layer.append(self.completion_layer2)
 
-        self.cvae = CVAE(norm_layer=norm_layer, bn_momentum=bn_momentum, latent_size=config.lantent_size)
+        self.cvae = CVAE(
+            norm_layer=norm_layer,
+            bn_momentum=bn_momentum,
+            latent_size=config.lantent_size,
+        )
         self.business_layer.append(self.cvae)
 
-        self.classify_sketch = nn.ModuleList([
-            nn.Sequential(
-                nn.ConvTranspose3d(feature * 2, feature, kernel_size=3, stride=2, padding=1, dilation=1,
-                                   output_padding=1),
-                norm_layer(feature, momentum=bn_momentum),
-                nn.ReLU(inplace=False),
-            ),
-            nn.Sequential(
-                nn.ConvTranspose3d(feature, feature, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1),
-                norm_layer(feature, momentum=bn_momentum),
-                nn.ReLU(inplace=False),
-            ),
-            nn.Sequential(
-                nn.Dropout3d(.1),
-                nn.Conv3d(feature, 2, kernel_size=1, bias=True)
-            )]
+        self.classify_sketch = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.ConvTranspose3d(
+                        feature * 2,
+                        feature,
+                        kernel_size=3,
+                        stride=2,
+                        padding=1,
+                        dilation=1,
+                        output_padding=1,
+                    ),
+                    norm_layer(feature, momentum=bn_momentum),
+                    nn.ReLU(inplace=False),
+                ),
+                nn.Sequential(
+                    nn.ConvTranspose3d(
+                        feature,
+                        feature,
+                        kernel_size=3,
+                        stride=2,
+                        padding=1,
+                        dilation=1,
+                        output_padding=1,
+                    ),
+                    norm_layer(feature, momentum=bn_momentum),
+                    nn.ReLU(inplace=False),
+                ),
+                nn.Sequential(
+                    nn.Dropout3d(0.1), nn.Conv3d(feature, 2, kernel_size=1, bias=True)
+                ),
+            ]
         )
         self.business_layer.append(self.classify_sketch)
 
     def forward(self, tsdf, depth_mapping_3d, sketch_gt=None):
-        '''
+        """
         extract 3D feature
-        '''
+        """
         tsdf = self.oper1(tsdf)
         completion1 = self.completion_layer1(tsdf)
         completion2 = self.completion_layer2(completion1)
@@ -299,14 +445,29 @@ class STAGE1(nn.Module):
         up_sketch2 = self.classify_sketch[1](up_sketch1)
         pred_sketch_raw = self.classify_sketch[2](up_sketch2)
 
-        _, pred_sketch_binary = torch.max(pred_sketch_raw, dim=1, keepdim=True)        # (b, 1, 60, 36, 60) binary-voxel sketch
-        pred_mean, pred_log_var, pred_sketch_gsnn, pred_sketch= self.cvae(pred_sketch_binary.float(), sketch_gt)
+        _, pred_sketch_binary = torch.max(
+            pred_sketch_raw, dim=1, keepdim=True
+        )  # (b, 1, 60, 36, 60) binary-voxel sketch
+        pred_mean, pred_log_var, pred_sketch_gsnn, pred_sketch = self.cvae(
+            pred_sketch_binary.float(), sketch_gt
+        )
+
         return pred_sketch_raw, pred_sketch_gsnn, pred_sketch, pred_mean, pred_log_var
 
 
 class STAGE2(nn.Module):
-    def __init__(self, class_num, norm_layer, resnet_out=2048, feature=512, ThreeDinit=True,
-                 bn_momentum=0.1, pretrained_model=None, eval=False, freeze_bn=False):
+    def __init__(
+        self,
+        class_num,
+        norm_layer,
+        resnet_out=2048,
+        feature=512,
+        ThreeDinit=True,
+        bn_momentum=0.1,
+        pretrained_model=None,
+        eval=False,
+        freeze_bn=False,
+    ):
         super(STAGE2, self).__init__()
         self.business_layer = []
 
@@ -314,13 +475,13 @@ class STAGE2(nn.Module):
             self.downsample = nn.Sequential(
                 nn.Conv2d(resnet_out, feature, kernel_size=1, bias=False),
                 nn.BatchNorm2d(feature, momentum=bn_momentum),
-                nn.ReLU()
+                nn.ReLU(),
             )
         else:
             self.downsample = nn.Sequential(
                 nn.Conv2d(resnet_out, feature, kernel_size=1, bias=False),
-                norm_layer(feature, momentum=bn_momentum),
-                nn.ReLU()
+                nn.BatchNorm2d(feature, momentum=bn_momentum),
+                nn.ReLU(),
             )
         self.business_layer.append(self.downsample)
 
@@ -332,49 +493,116 @@ class STAGE2(nn.Module):
         self.business_layer.append(self.pooling)
 
         self.semantic_layer1 = nn.Sequential(
-            Bottleneck3D(feature, feature // 4, bn_momentum=bn_momentum, expansion=4, stride=2, downsample=
-            nn.Sequential(
-                nn.AvgPool3d(kernel_size=2, stride=2),
-                nn.Conv3d(feature, feature,
-                          kernel_size=1, stride=1, bias=False),
-                norm_layer(feature, momentum=bn_momentum),
-            ), norm_layer=norm_layer),  # feature --> feature*2
-            Bottleneck3D(feature, feature // 4, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[1, 1, 1]),
-            Bottleneck3D(feature, feature // 4, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[2, 2, 2]),
-            Bottleneck3D(feature, feature // 4, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[3, 3, 3]),
+            Bottleneck3D(
+                feature,
+                feature // 4,
+                bn_momentum=bn_momentum,
+                expansion=4,
+                stride=2,
+                downsample=nn.Sequential(
+                    nn.AvgPool3d(kernel_size=2, stride=2),
+                    nn.Conv3d(feature, feature, kernel_size=1, stride=1, bias=False),
+                    norm_layer(feature, momentum=bn_momentum),
+                ),
+                norm_layer=norm_layer,
+            ),  # feature --> feature*2
+            Bottleneck3D(
+                feature,
+                feature // 4,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[1, 1, 1],
+            ),
+            Bottleneck3D(
+                feature,
+                feature // 4,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[2, 2, 2],
+            ),
+            Bottleneck3D(
+                feature,
+                feature // 4,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[3, 3, 3],
+            ),
         )
         self.business_layer.append(self.semantic_layer1)
 
         self.semantic_layer2 = nn.Sequential(
-            Bottleneck3D(feature, feature // 4, bn_momentum=bn_momentum, expansion=8, stride=2, downsample=
-            nn.Sequential(
-                nn.AvgPool3d(kernel_size=2, stride=2),
-                nn.Conv3d(feature, feature * 2,
-                          kernel_size=1, stride=1, bias=False),
-                norm_layer(feature * 2, momentum=bn_momentum),
-            ), norm_layer=norm_layer),
-            Bottleneck3D(feature * 2, feature // 2, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[1, 1, 1]),
-            Bottleneck3D(feature * 2, feature // 2, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[2, 2, 2]),
-            Bottleneck3D(feature * 2, feature // 2, bn_momentum=bn_momentum, norm_layer=norm_layer, dilation=[3, 3, 3]),
+            Bottleneck3D(
+                feature,
+                feature // 4,
+                bn_momentum=bn_momentum,
+                expansion=8,
+                stride=2,
+                downsample=nn.Sequential(
+                    nn.AvgPool3d(kernel_size=2, stride=2),
+                    nn.Conv3d(
+                        feature, feature * 2, kernel_size=1, stride=1, bias=False
+                    ),
+                    norm_layer(feature * 2, momentum=bn_momentum),
+                ),
+                norm_layer=norm_layer,
+            ),
+            Bottleneck3D(
+                feature * 2,
+                feature // 2,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[1, 1, 1],
+            ),
+            Bottleneck3D(
+                feature * 2,
+                feature // 2,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[2, 2, 2],
+            ),
+            Bottleneck3D(
+                feature * 2,
+                feature // 2,
+                bn_momentum=bn_momentum,
+                norm_layer=norm_layer,
+                dilation=[3, 3, 3],
+            ),
         )
         self.business_layer.append(self.semantic_layer2)
 
-        self.classify_semantic = nn.ModuleList([
-            nn.Sequential(
-                nn.ConvTranspose3d(feature * 2, feature, kernel_size=3, stride=2, padding=1, dilation=1,
-                                   output_padding=1),
-                norm_layer(feature, momentum=bn_momentum),
-                nn.ReLU(inplace=False),
-            ),
-            nn.Sequential(
-                nn.ConvTranspose3d(feature, feature, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1),
-                norm_layer(feature, momentum=bn_momentum),
-                nn.ReLU(inplace=False),
-            ),
-            nn.Sequential(
-                nn.Dropout3d(.1),
-                nn.Conv3d(feature, class_num, kernel_size=1, bias=True)
-            )]
+        self.classify_semantic = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.ConvTranspose3d(
+                        feature * 2,
+                        feature,
+                        kernel_size=3,
+                        stride=2,
+                        padding=1,
+                        dilation=1,
+                        output_padding=1,
+                    ),
+                    norm_layer(feature, momentum=bn_momentum),
+                    nn.ReLU(inplace=False),
+                ),
+                nn.Sequential(
+                    nn.ConvTranspose3d(
+                        feature,
+                        feature,
+                        kernel_size=3,
+                        stride=2,
+                        padding=1,
+                        dilation=1,
+                        output_padding=1,
+                    ),
+                    norm_layer(feature, momentum=bn_momentum),
+                    nn.ReLU(inplace=False),
+                ),
+                nn.Sequential(
+                    nn.Dropout3d(0.1),
+                    nn.Conv3d(feature, class_num, kernel_size=1, bias=True),
+                ),
+            ]
         )
         self.business_layer.append(self.classify_semantic)
 
@@ -407,22 +635,31 @@ class STAGE2(nn.Module):
         # reduce the channel of 2D feature map
         if self.resnet_out != self.feature:
             feature2d = self.downsample(feature2d)
-        feature2d = F.interpolate(feature2d, scale_factor=16, mode='bilinear', align_corners=True)
+        feature2d = F.interpolate(
+            feature2d, scale_factor=16, mode="bilinear", align_corners=True
+        )
 
-        '''
+        """
         project 2D feature to 3D space
-        '''
+        """
         b, c, h, w = feature2d.shape
         feature2d = feature2d.view(b, c, h * w).permute(0, 2, 1)  # b x h*w x c
 
-        zerosVec = torch.zeros(b, 1, c).cuda()  # for voxels that could not be projected from the depth map, we assign them zero vector
+        zerosVec = torch.zeros(
+            b, 1, c
+        ).cuda()  # for voxels that could not be projected from the depth map, we assign them zero vector
         segVec = torch.cat((feature2d, zerosVec), 1)
-        segres = [torch.index_select(segVec[i], 0, depth_mapping_3d[i]) for i in range(b)]
-        segres = torch.stack(segres).permute(0, 2, 1).contiguous().view(b, c, 60, 36, 60)  # B, (channel), 60, 36, 60
-        
-        '''
+
+        segres = [
+            torch.index_select(segVec[i], 0, depth_mapping_3d[i]) for i in range(b)
+        ]
+        segres = (
+            torch.stack(segres).permute(0, 2, 1).contiguous().view(b, c, 60, 36, 60)
+        )  # B, (channel), 60, 36, 60
+
+        """
         init the 3D feature
-        '''
+        """
         if self.ThreeDinit:
             pool = self.pooling(segres)
 
@@ -430,9 +667,9 @@ class STAGE2(nn.Module):
             pool = pool * zero
             segres = segres + pool
 
-        '''
+        """
         extract 3D feature
-        '''
+        """
         sketch_proi = self.oper_sketch(pred_sketch_raw)
         sketch_proi_gsnn = self.oper_sketch_cvae(pred_sketch_gsnn)
 
@@ -447,34 +684,72 @@ class STAGE2(nn.Module):
         return pred_semantic, None
 
 
-'''
+"""
 main network
-'''
+"""
+
+
 class Network(nn.Module):
-    def __init__(self, class_num, norm_layer, resnet_out=2048, feature=512, ThreeDinit=True,
-                 bn_momentum=0.1, pretrained_model=None, eval=False, freeze_bn=False):
+    def __init__(
+        self,
+        class_num,
+        norm_layer,
+        resnet_out=2048,
+        feature=512,
+        ThreeDinit=True,
+        bn_momentum=0.1,
+        pretrained_model=None,
+        eval=False,
+        freeze_bn=False,
+    ):
         super(Network, self).__init__()
         self.business_layer = []
 
         if eval:
-            self.backbone = get_resnet50(num_classes=19, dilation=[1, 1, 1, 2], bn_momentum=config.bn_momentum,
-                                         is_fpn=False,
-                                         BatchNorm2d=nn.BatchNorm2d)
+            self.backbone = get_resnet50(
+                num_classes=12,
+                dilation=[1, 1, 1, 2],
+                bn_momentum=config.bn_momentum,
+                is_fpn=False,
+                BatchNorm2d=nn.BatchNorm2d,
+            )
         else:
-            self.backbone = get_resnet50(num_classes=19, dilation=[1, 1, 1, 2], bn_momentum=config.bn_momentum,
-                                         is_fpn=False,
-                                         BatchNorm2d=norm_layer)
+            self.backbone = get_resnet50(
+                num_classes=12,
+                dilation=[1, 1, 1, 2],
+                bn_momentum=config.bn_momentum,
+                is_fpn=False,
+                BatchNorm2d=nn.BatchNorm2d,
+            )
         self.dilate = 2
         for m in self.backbone.layer4.children():
             m.apply(partial(self._nostride_dilate, dilate=self.dilate))
             self.dilate *= 2
 
-        self.stage1 = STAGE1(class_num, norm_layer, resnet_out=resnet_out, feature=feature, ThreeDinit=ThreeDinit,
-                             bn_momentum=bn_momentum, pretrained_model=pretrained_model, eval=eval, freeze_bn=freeze_bn)
+        self.stage1 = STAGE1(
+            class_num,
+            norm_layer,
+            resnet_out=resnet_out,
+            feature=feature,
+            ThreeDinit=ThreeDinit,
+            bn_momentum=bn_momentum,
+            pretrained_model=pretrained_model,
+            eval=eval,
+            freeze_bn=freeze_bn,
+        )
         self.business_layer += self.stage1.business_layer
 
-        self.stage2 = STAGE2(class_num, norm_layer, resnet_out=resnet_out, feature=feature, ThreeDinit=ThreeDinit,
-                             bn_momentum=bn_momentum, pretrained_model=pretrained_model, eval=eval, freeze_bn=freeze_bn)
+        self.stage2 = STAGE2(
+            class_num,
+            nn.BatchNorm3d,
+            resnet_out=resnet_out,
+            feature=feature,
+            ThreeDinit=ThreeDinit,
+            bn_momentum=bn_momentum,
+            pretrained_model=pretrained_model,
+            eval=eval,
+            freeze_bn=freeze_bn,
+        )
         self.business_layer += self.stage2.business_layer
 
     def forward(self, rgb, depth_mapping_3d, tsdf, sketch_gt=None):
@@ -482,13 +757,28 @@ class Network(nn.Module):
         h, w = rgb.size(2), rgb.size(3)
 
         feature2d = self.backbone(rgb)
-        # print(tsdf.shape)
-        pred_sketch_raw, pred_sketch_gsnn, pred_sketch, pred_mean, pred_log_var = self.stage1(tsdf, depth_mapping_3d, sketch_gt)
-        pred_semantic, _ = self.stage2(feature2d, depth_mapping_3d, pred_sketch_raw,
-                                                                pred_sketch_gsnn)
+
+        (
+            pred_sketch_raw,
+            pred_sketch_gsnn,
+            pred_sketch,
+            pred_mean,
+            pred_log_var,
+        ) = self.stage1(tsdf, depth_mapping_3d, sketch_gt)
+        pred_semantic, _ = self.stage2(
+            feature2d, depth_mapping_3d, pred_sketch_raw, pred_sketch_gsnn
+        )
 
         if self.training:
-            return pred_semantic, _, pred_sketch_raw, pred_sketch_gsnn, pred_sketch, pred_mean, pred_log_var
+            return (
+                pred_semantic,
+                _,
+                pred_sketch_raw,
+                pred_sketch_gsnn,
+                pred_sketch,
+                pred_mean,
+                pred_log_var,
+            )
         return pred_semantic, _, pred_sketch_gsnn
 
     # @staticmethod
@@ -506,16 +796,18 @@ class Network(nn.Module):
                     m.padding = (dilate, dilate)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     model = Network(class_num=12, norm_layer=nn.BatchNorm3d, feature=128, eval=True)
     # print(model)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     model.eval()
 
     left = torch.rand(1, 3, 480, 640).cuda()
     right = torch.rand(1, 3, 480, 640).cuda()
-    depth_mapping_3d = torch.from_numpy(np.ones((1, 129600)).astype(np.int64)).long().cuda()
+    depth_mapping_3d = (
+        torch.from_numpy(np.ones((1, 129600)).astype(np.int64)).long().cuda()
+    )
     tsdf = torch.rand(1, 1, 60, 36, 60).cuda()
 
     out = model(left, depth_mapping_3d, tsdf, None)

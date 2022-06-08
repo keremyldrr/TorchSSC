@@ -6,6 +6,18 @@ log/
 *.jpg
 *.log
 *.pth
+*.ply
+*.so
+*.txt
+*.ipynb
+*.mat
+*.csv
+*.o
+furnace/**
+apex
+furnace
+log*
+DATA
 __pycache__
 
 
