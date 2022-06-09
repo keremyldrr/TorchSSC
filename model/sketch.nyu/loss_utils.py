@@ -5,6 +5,7 @@ from seg_opr.metric import hist_info, compute_score
 import numpy as np
 from score_utils import score_to_pred
 from sc_utils import export_grid
+import pdb
 
 
 def compute_loss(
@@ -31,7 +32,6 @@ def compute_loss(
         0,
         selectindex,
     )
-    # print(filterOutput,filterLabel)
     loss_semantic = criterion(filterOutput, filterLabel)
     loss_semantic = torch.mean(loss_semantic)
 
@@ -194,6 +194,7 @@ def process_one_batch(dataloader, model, config, engine):
             loss_sketch,
             loss_sketch_gsnn,
             KLD,
+            results_dict,
         ) = compute_loss(
             label_weight,
             label,

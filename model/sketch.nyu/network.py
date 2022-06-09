@@ -4,11 +4,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-
+import pytorch_lightning as pl
 from functools import partial
 from collections import OrderedDict
 from config import config
 from resnet import get_resnet50
+from torch_poly_lr_decay import PolynomialLRDecay
+from score_utils import compute_metric, score_to_pred
+import sys
+
+import pdb
+
+sys.path.append("/home/yildirir/workspace/kerem/TorchSSC/furnace/")
+from utils.init_func import init_weight, group_weight
+from loss_utils import compute_loss
 
 
 class SimpleRB(nn.Module):
@@ -689,7 +698,7 @@ main network
 """
 
 
-class Network(nn.Module):
+class Network(pl.LightningModule):
     def __init__(
         self,
         class_num,
@@ -701,21 +710,22 @@ class Network(nn.Module):
         pretrained_model=None,
         eval=False,
         freeze_bn=False,
+        config=None,
     ):
         super(Network, self).__init__()
         self.business_layer = []
-
+        self.config = config
         if eval:
             self.backbone = get_resnet50(
-                num_classes=12,
+                num_classes=class_num,
                 dilation=[1, 1, 1, 2],
-                bn_momentum=config.bn_momentum,
+                bn_momentum=self.config.bn_momentum,
                 is_fpn=False,
                 BatchNorm2d=nn.BatchNorm2d,
             )
         else:
             self.backbone = get_resnet50(
-                num_classes=12,
+                num_classes=class_num,
                 dilation=[1, 1, 1, 2],
                 bn_momentum=config.bn_momentum,
                 is_fpn=False,
@@ -752,6 +762,22 @@ class Network(nn.Module):
         )
         self.business_layer += self.stage2.business_layer
 
+        init_weight(
+            self.business_layer,
+            nn.init.kaiming_normal_,
+            nn.BatchNorm3d,
+            config.bn_eps,
+            config.bn_momentum,
+            mode="fan_in",
+        )  # , nonlinearity='relu')
+
+        state_dict = torch.load(config.pretrained_model)  # ['state_dict']
+        transformed_state_dict = {}
+        for k, v in state_dict.items():
+            transformed_state_dict[k.replace(".bn.", ".")] = v
+
+        self.backbone.load_state_dict(transformed_state_dict, strict=False)
+
     def forward(self, rgb, depth_mapping_3d, tsdf, sketch_gt=None):
 
         h, w = rgb.size(2), rgb.size(3)
@@ -780,6 +806,203 @@ class Network(nn.Module):
                 pred_log_var,
             )
         return pred_semantic, _, pred_sketch_gsnn
+
+    # @staticmethod
+    def configure_optimizers(self):
+
+        base_lr = self.config.lr
+
+        """ fix the weight of resnet"""
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+
+        params_list = []
+        for module in self.business_layer:
+            params_list = group_weight(params_list, module, nn.BatchNorm2d, base_lr)
+
+        optimizer = torch.optim.SGD(
+            params_list,
+            lr=base_lr,
+            momentum=self.config.momentum,
+            weight_decay=self.config.weight_decay,
+        )
+        # TODO get these info from trainer
+        scheduler = PolynomialLRDecay(
+            optimizer, max_decay_steps=self.config.nepochs, power=self.config.lr_power
+        )
+        return [optimizer], [scheduler]  # super().configure_optimizers()
+
+    def training_step(self, batch, batch_idx):
+
+        img = batch["data"].float()
+        hha = batch["hha_img"]
+        label = batch["label"]
+        label_weight = batch["label_weight"]
+        tsdf = batch["tsdf"].float()
+        depth_mapping_3d = batch["depth_mapping_3d"]
+        sketch_gt = batch["sketch_gt"].long()
+        (
+            output,
+            _,
+            pred_sketch_raw,
+            pred_sketch_gsnn,
+            pred_sketch,
+            pred_mean,
+            pred_log_var,
+        ) = self.forward(img, depth_mapping_3d, tsdf, sketch_gt)
+
+        cri_weights = (torch.ones(self.config.num_classes)).type_as(tsdf)
+        cri_weights[0] = self.config.empty_loss_weight
+        criterion = nn.CrossEntropyLoss(
+            ignore_index=255, reduction="none", weight=cri_weights.type_as(tsdf)
+        )
+
+        (
+            loss,
+            loss_semantic,
+            loss_sketch_raw,
+            loss_sketch,
+            loss_sketch_gsnn,
+            KLD,
+        ) = compute_loss(
+            label_weight,
+            label,
+            output,
+            criterion,
+            sketch_gt,
+            pred_sketch_raw,
+            pred_sketch,
+            pred_sketch_gsnn,
+            pred_log_var,
+            pred_mean,
+            engine=None,
+            config=self.config,
+        )
+
+        del (
+            img,
+            hha,
+            tsdf,
+            label_weight,
+            label,
+            output,
+            criterion,
+            sketch_gt,
+            pred_sketch_raw,
+            pred_sketch,
+            pred_sketch_gsnn,
+        )
+        self.log("train/loss/total", loss, sync_dist=True, on_epoch=True)
+        self.log("train/loss/semantic", loss_semantic, sync_dist=True, on_epoch=True)
+        self.log(
+            "train/loss/sketch_raw_loss", loss_sketch_raw, sync_dist=True, on_epoch=True
+        )
+        self.log("train/loss/sketch", loss_sketch, sync_dist=True, on_epoch=True)
+        self.log(
+            "train/loss/sketch_gsnn", loss_sketch_gsnn, sync_dist=True, on_epoch=True
+        )
+        self.log("train/loss/KLD", KLD, sync_dist=True, on_epoch=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        img = batch["data"].float()
+        hha = batch["hha_img"]
+        label = batch["label"]
+        label_weight = batch["label_weight"]
+        tsdf = batch["tsdf"].float()
+        depth_mapping_3d = batch["depth_mapping_3d"]
+        sketch_gt = batch["sketch_gt"].long()
+        self.train()
+        # with torch.no_grad():
+        (
+            output,
+            _,
+            pred_sketch_raw,
+            pred_sketch_gsnn,
+            pred_sketch,
+            pred_mean,
+            pred_log_var,
+        ) = self.forward(img, depth_mapping_3d, tsdf, sketch_gt)
+
+        score = output[0]
+
+        score = torch.exp(score).detach().cpu()
+        pred = score_to_pred(score)
+
+        results_dict = {
+            "pred": pred,
+            "label": label.detach().cpu(),
+            "label_weight": label_weight.detach().cpu(),
+            "name": batch["fn"],
+            "mapping": depth_mapping_3d.detach().cpu(),
+        }
+        cri_weights = torch.ones(self.config.num_classes)
+        cri_weights[0] = self.config.empty_loss_weight
+        criterion = nn.CrossEntropyLoss(
+            ignore_index=255, reduction="none", weight=cri_weights.type_as(tsdf)
+        )
+        (
+            loss,
+            loss_semantic,
+            loss_sketch_raw,
+            loss_sketch,
+            loss_sketch_gsnn,
+            KLD,
+        ) = compute_loss(
+            label_weight,
+            label,
+            output,
+            criterion,
+            sketch_gt,
+            pred_sketch_raw,
+            pred_sketch,
+            pred_sketch_gsnn,
+            pred_log_var,
+            pred_mean,
+            engine=None,
+            config=self.config,
+        )
+
+        del (
+            img,
+            hha,
+            tsdf,
+            label_weight,
+            label,
+            output,
+            criterion,
+            sketch_gt,
+            pred_sketch_raw,
+            pred_sketch,
+            pred_sketch_gsnn,
+        )
+        self.log("val/loss/total", loss, sync_dist=True, on_epoch=True)
+        self.log("val/loss/semantic", loss_semantic, sync_dist=True, on_epoch=True)
+        self.log(
+            "val/loss/sketch_raw_loss", loss_sketch_raw, sync_dist=True, on_epoch=True
+        )
+        self.log("val/loss/sketch", loss_sketch, sync_dist=True, on_epoch=True)
+        self.log(
+            "val/loss/sketch_gsnn", loss_sketch_gsnn, sync_dist=True, on_epoch=True
+        )
+        self.log("val/loss/KLD", KLD, sync_dist=True, on_epoch=True)
+        return results_dict
+
+    def validation_epoch_end(self, val_step_outputs):
+
+        # pdb.set_trace()
+        results_line, metric = compute_metric(
+            self.config, val_step_outputs, confusion=False
+        )
+        # print("Val loss",val_sum_loss)
+        sscmIOU, sscPixel, scIOU, scPixel, scRecall = metric
+        self.log("val/sscmIOU", sscmIOU, sync_dist=True)
+        self.log("val/sscPixel", sscPixel, sync_dist=True)
+        self.log("val/scIOU", scIOU, sync_dist=True)
+        self.log("val/scPixel", scPixel, sync_dist=True)
+        self.log("val/scRecall", scRecall, sync_dist=True)
+
+        return None
 
     # @staticmethod
     def _nostride_dilate(self, m, dilate):

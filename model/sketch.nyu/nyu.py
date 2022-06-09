@@ -9,6 +9,10 @@ import io
 from io import BytesIO
 import pytorch_lightning as pl
 
+from torch.utils.data import DataLoader
+
+from utils.img_utils import normalize
+
 
 class NYUv2(BaseDataset):
     def __init__(
@@ -195,3 +199,121 @@ class NYUv2(BaseDataset):
             cmap[i, 2] = b
         class_colors = cmap.tolist()
         return class_colors
+
+
+class TrainPre(object):
+    def __init__(self, img_mean, img_std):
+        self.img_mean = img_mean
+        self.img_std = img_std
+
+    def __call__(self, img, hha):
+        img = normalize(img, self.img_mean, self.img_std)
+        # hha = normalize(hha, self.img_mean, self.img_std)
+
+        p_img = img.transpose(2, 0, 1)
+        p_hha = hha  # ,p.transpose(2, 0, 1)
+
+        extra_dict = {"hha_img": p_hha}  # TODO, normlaize depth
+
+        return p_img, extra_dict
+
+
+class ValPre(object):
+    def __call__(self, img, hha):
+        extra_dict = {"hha_img": img}  # TODO, depth is useless now()
+
+        return img, extra_dict
+
+
+class NYUDataModule(pl.LightningDataModule):
+    def __init__(self, config):
+        super().__init__()
+
+        data_setting = {
+            "img_root": config.img_root_folder,
+            "gt_root": config.gt_root_folder,
+            "hha_root": config.hha_root_folder,
+            "mapping_root": config.mapping_root_folder,
+            "train_source": config.train_source,
+            "eval_source": config.eval_source,
+            "dataset_path": config.dataset_path,
+        }
+        train_preprocess = TrainPre(config.image_mean, config.image_std)
+
+        val_preprocess = TrainPre(config.image_mean, config.image_std)
+        self.train_dataset = NYUv2(
+            data_setting,
+            "train",
+            train_preprocess,
+            config.batch_size * config.niters_per_epoch,
+            s3client=None,
+            only_frustum=config.only_frustum,
+            only_box=config.only_boxes,
+        )
+
+        self.val_dataset = NYUv2(
+            data_setting,
+            "val",
+            val_preprocess,
+            1 * config.niters_per_epoch,
+            s3client=None,
+            only_frustum=config.only_frustum,
+            only_box=config.only_boxes,
+        )
+        self.val_loader = DataLoader(
+            self.val_dataset,
+            batch_size=1,  # config.batch_size,
+            num_workers=config.num_workers,
+            drop_last=False,
+            shuffle=False,
+            pin_memory=True,
+        )
+        self.config = config
+        # self.hparams = args
+
+    @staticmethod
+    def add_data_loader_arguments(parent_parser):
+        # parser = parent_parser.add_argument_group("ScanNetLoader")
+        # parser.add_argument("--batch_size", type=int, default=12)
+        # parser.add_argument("--sigma", type=float, default=0.0)
+        # parser.add_argument("--num_points", default=40000)
+        # parser.add_argument("--use_color", action="store_true")
+        # parser.add_argument("--use_height", action="store_true")
+        # parser.add_argument("--augment", action="store_true")
+        # parser.add_argument("--overfit", action="store_true")
+        # return parent_parser
+        pass
+
+    def train_dataloader(self):
+
+        train_loader = DataLoader(
+            self.train_dataset,
+            batch_size=self.config.batch_size,
+            num_workers=self.config.num_workers,
+            drop_last=True,
+            shuffle=True,
+            pin_memory=True,
+        )
+        return train_loader
+
+    def val_dataloader(self):
+        return [
+            DataLoader(
+                self.val_dataset,
+                batch_size=1,  # self.config.batch_size,
+                shuffle=False,
+                num_workers=2,
+                pin_memory=True,
+            ),
+            # self.train_subset_dataloader(),
+        ]
+
+    # TODO  Implement smaller train_mini and validation, maybe just alter the filename list
+    def train_subset_dataloader(self):
+        return DataLoader(
+            self.train_subset_dataset,
+            batch_size=self.hparams.batch_size,
+            shuffle=False,
+            num_workers=2,
+            pin_memory=True,
+        )
