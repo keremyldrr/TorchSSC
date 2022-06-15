@@ -27,9 +27,8 @@ def compute_loss(
     semantic loss
     """
     selectindex = torch.nonzero(label_weight.view(-1)).view(-1)
-    if config.dataset != "NYUv2":
-        label[label == 3] = 1
-        label[label == 5] = 2
+    label[label == 3] = 1
+    label[label == 5] = 2
     filterLabel = torch.index_select(label.view(-1), 0, selectindex)
 
     filterOutput = torch.index_select(

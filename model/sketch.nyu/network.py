@@ -13,6 +13,7 @@ from torch_poly_lr_decay import PolynomialLRDecay
 from score_utils import compute_metric, score_to_pred
 import sys
 
+from sc_utils import export_grid
 import pdb
 
 sys.path.append("/home/yildirir/workspace/kerem/TorchSSC/furnace/")
@@ -256,9 +257,13 @@ class CVAE(nn.Module):
             out_samples_gsnn = []
             for i in range(config.samples):
                 std = pred_log_var.mul(0.5).exp_()
-                eps = torch.randn([b, self.latent_size, h // 4, w // 4, l // 4]).cuda()
+                eps = torch.randn(
+                    [b, self.latent_size, h // 4, w // 4, l // 4]
+                ).type_as(pred_log_var)
                 z1 = eps * std + pred_mean
-                z2 = torch.randn([b, self.latent_size, h // 4, w // 4, l // 4]).cuda()
+                z2 = torch.randn([b, self.latent_size, h // 4, w // 4, l // 4]).type_as(
+                    pred_log_var
+                )
 
                 sketch = self.decoder(torch.cat([decoder_x, z1], dim=1))
                 out_samples.append(sketch)
@@ -279,7 +284,9 @@ class CVAE(nn.Module):
         else:
             out_samples = []
             for i in range(config.samples):
-                z = torch.randn([b, self.latent_size, h // 4, w // 4, l // 4]).cuda()
+                z = torch.randn([b, self.latent_size, h // 4, w // 4, l // 4]).type_as(
+                    x
+                )
                 decoder_x = self.decoder_x(x)
                 out = self.decoder(torch.cat([decoder_x, z], dim=1))
                 out_samples.append(out)
@@ -654,9 +661,9 @@ class STAGE2(nn.Module):
         b, c, h, w = feature2d.shape
         feature2d = feature2d.view(b, c, h * w).permute(0, 2, 1)  # b x h*w x c
 
-        zerosVec = torch.zeros(
-            b, 1, c
-        ).cuda()  # for voxels that could not be projected from the depth map, we assign them zero vector
+        zerosVec = torch.zeros(b, 1, c).type_as(
+            feature2d
+        )  # for voxels that could not be projected from the depth map, we assign them zero vector
         segVec = torch.cat((feature2d, zerosVec), 1)
 
         segres = [
@@ -713,7 +720,11 @@ class Network(pl.LightningModule):
         config=None,
     ):
         super(Network, self).__init__()
+
+        self.automatic_optimization = False
+        self.save_hyperparameters(config)
         self.business_layer = []
+        self.debug = False
         self.config = config
         if eval:
             self.backbone = get_resnet50(
@@ -731,6 +742,7 @@ class Network(pl.LightningModule):
                 is_fpn=False,
                 BatchNorm2d=nn.BatchNorm2d,
             )
+
         self.dilate = 2
         for m in self.backbone.layer4.children():
             m.apply(partial(self._nostride_dilate, dilate=self.dilate))
@@ -821,15 +833,19 @@ class Network(pl.LightningModule):
             params_list = group_weight(params_list, module, nn.BatchNorm2d, base_lr)
 
         optimizer = torch.optim.SGD(
+            # self.parameters(),
             params_list,
             lr=base_lr,
             momentum=self.config.momentum,
             weight_decay=self.config.weight_decay,
         )
-        # TODO get these info from trainer
         scheduler = PolynomialLRDecay(
-            optimizer, max_decay_steps=self.config.nepochs, power=self.config.lr_power
+            optimizer,
+            max_decay_steps=self.config.steps_per_epoch * config.nepochs,
+            end_learning_rate=1e-4,
+            power=self.config.lr_power,
         )
+        print(self.config.steps_per_epoch * config.nepochs)
         return [optimizer], [scheduler]  # super().configure_optimizers()
 
     def training_step(self, batch, batch_idx):
@@ -841,6 +857,10 @@ class Network(pl.LightningModule):
         tsdf = batch["tsdf"].float()
         depth_mapping_3d = batch["depth_mapping_3d"]
         sketch_gt = batch["sketch_gt"].long()
+        opt = self.optimizers()
+        sch = self.lr_schedulers()
+        opt.zero_grad()
+        # pdb.set_trace()
         (
             output,
             _,
@@ -878,7 +898,9 @@ class Network(pl.LightningModule):
             engine=None,
             config=self.config,
         )
-
+        self.manual_backward(loss)
+        opt.step()
+        sch.step()
         del (
             img,
             hha,
@@ -892,7 +914,7 @@ class Network(pl.LightningModule):
             pred_sketch,
             pred_sketch_gsnn,
         )
-        self.log("train/loss/total", loss, sync_dist=True, on_epoch=True)
+        self.log("train/loss/total", loss, sync_dist=True, on_epoch=True, prog_bar=True)
         self.log("train/loss/semantic", loss_semantic, sync_dist=True, on_epoch=True)
         self.log(
             "train/loss/sketch_raw_loss", loss_sketch_raw, sync_dist=True, on_epoch=True
@@ -912,23 +934,36 @@ class Network(pl.LightningModule):
         tsdf = batch["tsdf"].float()
         depth_mapping_3d = batch["depth_mapping_3d"]
         sketch_gt = batch["sketch_gt"].long()
-        self.train()
+        # self.train()
         # with torch.no_grad():
-        (
-            output,
-            _,
-            pred_sketch_raw,
-            pred_sketch_gsnn,
-            pred_sketch,
-            pred_mean,
-            pred_log_var,
-        ) = self.forward(img, depth_mapping_3d, tsdf, sketch_gt)
+        # (
+        #     output,
+        #     _,
+        #     pred_sketch_raw,
+        #     pred_sketch_gsnn,
+        #     pred_sketch,
+        #     pred_mean,
+        #     pred_log_var,
+        # pdb.set_trace()
+        # ) = self.forward(img, depth_mapping_3d, tsdf, sketch_gt)
+        output, _, pred_sketch_gsnn = self.forward(
+            img, depth_mapping_3d, tsdf, sketch_gt
+        )
 
         score = output[0]
 
         score = torch.exp(score).detach().cpu()
         pred = score_to_pred(score)
 
+        if self.debug:
+            pdb.set_trace()
+            export_grid(
+                "pred.ply", pred * label_weight.cpu().numpy().reshape(pred.shape)
+            )
+
+            export_grid("label_weight.ply", label_weight.reshape(pred.shape))
+            export_grid("label.ply", label.reshape(pred.shape))
+            export_grid("mapping.ply", (depth_mapping_3d != 307200).reshape(pred.shape))
         results_dict = {
             "pred": pred,
             "label": label.detach().cpu(),
@@ -936,60 +971,60 @@ class Network(pl.LightningModule):
             "name": batch["fn"],
             "mapping": depth_mapping_3d.detach().cpu(),
         }
-        cri_weights = torch.ones(self.config.num_classes)
-        cri_weights[0] = self.config.empty_loss_weight
-        criterion = nn.CrossEntropyLoss(
-            ignore_index=255, reduction="none", weight=cri_weights.type_as(tsdf)
-        )
-        (
-            loss,
-            loss_semantic,
-            loss_sketch_raw,
-            loss_sketch,
-            loss_sketch_gsnn,
-            KLD,
-        ) = compute_loss(
-            label_weight,
-            label,
-            output,
-            criterion,
-            sketch_gt,
-            pred_sketch_raw,
-            pred_sketch,
-            pred_sketch_gsnn,
-            pred_log_var,
-            pred_mean,
-            engine=None,
-            config=self.config,
-        )
+        # cri_weights = torch.ones(self.config.num_classes)
+        # cri_weights[0] = self.config.empty_loss_weight
+        # criterion = nn.CrossEntropyLoss(
+        #     ignore_index=255, reduction="none", weight=cri_weights.type_as(tsdf)
+        # )
 
-        del (
-            img,
-            hha,
-            tsdf,
-            label_weight,
-            label,
-            output,
-            criterion,
-            sketch_gt,
-            pred_sketch_raw,
-            pred_sketch,
-            pred_sketch_gsnn,
-        )
-        self.log("val/loss/total", loss, sync_dist=True, on_epoch=True)
-        self.log("val/loss/semantic", loss_semantic, sync_dist=True, on_epoch=True)
-        self.log(
-            "val/loss/sketch_raw_loss", loss_sketch_raw, sync_dist=True, on_epoch=True
-        )
-        self.log("val/loss/sketch", loss_sketch, sync_dist=True, on_epoch=True)
-        self.log(
-            "val/loss/sketch_gsnn", loss_sketch_gsnn, sync_dist=True, on_epoch=True
-        )
-        self.log("val/loss/KLD", KLD, sync_dist=True, on_epoch=True)
+        # (
+        #     loss,
+        #     loss_semantic,
+        #     loss_sketch_raw,
+        #     loss_sketch,
+        #     loss_sketch_gsnn,
+        #     KLD,
+        # ) = compute_loss(
+        #     label_weight,
+        #     label,
+        #     output,
+        #     criterion,
+        #     sketch_gt,
+        #     pred_sketch_raw,
+        #     pred_sketch,
+        #     pred_sketch_gsnn,
+        #     pred_log_var,
+        #     pred_mean,
+        #     engine=None,
+        #     config=self.config,
+        # )
+
+        # del (
+        #     img,
+        #     hha,
+        #     tsdf,
+        #     label_weight,
+        #     label,
+        #     output,
+        #     criterion,
+        #     sketch_gt,
+        #     pred_sketch_raw,
+        #     pred_sketch,
+        #     pred_sketch_gsnn,
+        # )
+        # self.log("val/loss/total", loss, sync_dist=True, on_epoch=True)
+        # self.log("val/loss/semantic", loss_semantic, sync_dist=True, on_epoch=True)
+        # self.log(
+        #     "val/loss/sketch_raw_loss", loss_sketch_raw, sync_dist=True, on_epoch=True
+        # )
+        # self.log("val/loss/sketch", loss_sketch, sync_dist=True, on_epoch=True)
+        # self.log(
+        #     "val/loss/sketch_gsnn", loss_sketch_gsnn, sync_dist=True, on_epoch=True
+        # )
+        # self.log("val/loss/KLD", KLD, sync_dist=True, on_epoch=True)
         return results_dict
 
     def validation_epoch_end(self, val_step_outputs):
-
         # pdb.set_trace()
         results_line, metric = compute_metric(
             self.config, val_step_outputs, confusion=False

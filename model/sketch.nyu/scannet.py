@@ -70,8 +70,11 @@ class ScanNet(BaseDataset):
         s3client=None,
         only_frustum=False,
         only_box=False,
+        classes=[2, 4],
+        overfit=False,
     ):
-        super(ScanNet, self).__init__(setting, split_name, preprocess, file_length)
+        # super(ScanNet, self).__init__(setting, split_name, preprocess, file_length)
+        self.classes = classes
         self._split_name = split_name
         self._img_path = setting["img_root"]
         self._gt_path = setting["gt_root"]
@@ -80,6 +83,8 @@ class ScanNet(BaseDataset):
         self._mappiing_path = setting["mapping_root"]
         self._train_source = setting["train_source"]
         self._eval_source = setting["eval_source"]
+
+        self.overfit = overfit
         self._file_names = self._get_file_names(split_name)
         self._file_length = (
             len(self._file_names) if file_length is not None else file_length
@@ -87,6 +92,7 @@ class ScanNet(BaseDataset):
         self.preprocess = preprocess
         self.s3client = s3client
         self.only_frustum = only_frustum
+        self.thresh = 0.3
         self.only_box = only_box
 
     def read_ceph_img(self, mode, value):
@@ -113,23 +119,128 @@ class ScanNet(BaseDataset):
         array = np.load(value_buf)
         return array
 
-    def _get_file_names(self, split_name):
-        assert split_name in ["train", "val"]
+    # def _get_file_names(self, split_name):
+    #     assert split_name in ["train", "val"]
+    #     source = self._train_source
+    #     if split_name == "val":
+    #         source = self._eval_source
+
+    #     file_names = []
+    #     with open(source) as f:
+    #         files = f.readlines()
+
+    #     for item in files:
+    #         item = item.strip()
+    #         item = item.split("\t")
+    #         img_name = item[0]
+    #         file_names.append([img_name, None])
+
+    #     return file_names
+
+    def _get_file_names(self, split_name, thresh=0.3):
+        assert split_name in ["train", "val", "train_subset"]
         source = self._train_source
         if split_name == "val":
             source = self._eval_source
 
         file_names = []
         with open(source) as f:
-            files = f.readlines()
 
-        for item in files:
+            files = f.readlines()  # FIXME undo this
+        # files = [files,files]
+
+        # files = files[:500]
+        print("Recreating files")
+
+        st = time.time()
+        cls_dict = {key: 0 for key in self.classes}
+        for item in files[:]:
             item = item.strip()
             item = item.split("\t")
             img_name = item[0]
-            file_names.append([img_name, None])
+            item_idx = img_name
+            scene_name = item_idx[: item_idx.rfind("_")]
+            unformatted = item_idx[item_idx.rfind("_") + 1 :]
 
-        return file_names
+            instancedir = os.path.join(
+                self._path, scene_name, "PCD", "instances_{}".format(unformatted)
+            )
+
+            objs_in_scene = os.listdir(instancedir)
+            # instances = get_instance_boxes(instancedir,with_classes=False,thresh=thresh)
+
+            scores = np.array([float(a[:-4].split("_")[5]) for a in objs_in_scene])
+            classes = np.array([float(a[:-4].split("_")[3]) for a in objs_in_scene])
+            cls_mask = np.array([cls in self.classes for cls in classes])
+            scores = scores[cls_mask]
+            # pdb.set_trace()
+            for c in self.classes:
+                if cls_mask.sum() > 0:
+                    cls_dict[c] += (classes[cls_mask] == c).sum()
+            if len(scores[scores > thresh]) > 0:
+                file_names.append([img_name, None])
+
+        import datetime
+
+        total = 0
+        assert len(self.classes) <= 2, "This weighting is only for chairs and tables"
+        for c in self.classes:
+            total += cls_dict[c]
+        print(cls_dict, total)
+        for k, v in cls_dict.items():
+            print(k, 1 - v / total)
+            cls_dict[k] = 1 - v / total
+
+        self.cls_weight_dict = cls_dict
+        # with open(
+        #     "{}_{}.txt".format(str(datetime.datetime.now()), split_name), "w"
+        # ) as out:
+        #     for f in file_names:
+        #         out.write(f[0] + "\n")
+        print(
+            "Dataset created with size ",
+            len(file_names),
+            " took ",
+            time.time() - st,
+            "seconds",
+        )
+        # np.random.seed(10)
+        np.random.shuffle(file_names)
+
+        if self.overfit:
+            # return [["scene0030_01_2", None]]
+            return [
+                # ["scene0407_00_4", None],
+                # ["scene0575_02_25", None]
+                ["scene0015_00_2", None],
+                ["scene0015_00_2", None],
+                ["scene0015_00_2", None],
+                ["scene0015_00_2", None],
+                ["scene0015_00_2", None],
+                ["scene0015_00_2", None],
+                ["scene0015_00_2", None],
+                ["scene0015_00_2", None],
+                # ["scene0030_01_1", None],
+                # ["scene0030_01_1", None],
+                # ["scene0030_01_1", None],
+                # ["scene0030_01_1", None],
+                # ["scene0030_01_1", None],
+                # ["scene0030_01_1", None],
+                # ["scene0030_01_1", None],
+                # ["scene0030_01_1", None],
+            ]
+            # ]
+
+            # return [["scene0685_02_4", None]]
+            # return file_names[16:24]
+            # return [["scene0015_00_2", None]]
+            # return [["scene0575_02_25", None]]
+            # return [["scene0655_01_9", None]]  # , ["scene0000_00_3", None]]
+        with open("{}_{}.txt".format(str(thresh), split_name), "w") as out:
+            for f in file_names[:500]:
+                out.write(f[0] + "\n")
+
+        return file_names  # [:500]
 
     def __getitem__(self, index):
         st = time.time()
@@ -280,7 +391,6 @@ class ScanNet(BaseDataset):
         img = np.array(cv2.imread(img_path), dtype=np.float32)
         assert img is not None, img_path
         hha = np.array(cv2.imread(hha_path, -1), dtype=np.float32)
-
         # assert (hha is not None) & np.isnan(hha) == False , hha_path
         hha = hha / 1000
         # print(img_path)
@@ -294,6 +404,12 @@ class ScanNet(BaseDataset):
         depth_mapping_3d = np.load(mapping_path)["arr_0"].astype(np.int64)
         gt = np.load(gt_path)["arr_0"].flatten().astype(np.int64)
         sketch_gt = np.load(sketch_path).astype(np.int64).flatten()
+
+        classes = [3, 5]
+        cls_mask = np.zeros_like(gt)
+        for c in classes:
+            cls_mask[gt == c] = 1
+        gt = gt * cls_mask
         if self.only_frustum and not self.only_box:
             # label_weight[tsdf==0 ]= 0
 
@@ -305,6 +421,8 @@ class ScanNet(BaseDataset):
             # gt[(tsdf == 0) | (tsdf > 0) | (tsdf  == -1) ]= 255# getting only inside of the frustum
             #            print("Only FRUSTUM!!!!")
             sketch_gt[gt == 255] = 0
+
+            # label_weight = (depth_mapping_3d != 307200).astype(int)
             # if self.only_box:
             #    raise NotImplementedError(" Only box cant be enabled with frustum")
 
@@ -327,8 +445,16 @@ class ScanNet(BaseDataset):
                 camera_pose=camera_pose, axis_align_matrix=axis_align_matrix
             )
 
-            boxes = get_instance_boxes(instancedir)
+            # boxes = get_instance_boxes(instancedir)
+            boxes, classes, scores = get_instance_boxes(
+                instancedir=instancedir, with_classes=True, thresh=self.thresh
+            )
+            cls_mask = np.array([a in self.classes for a in classes])
+            boxes = np.array(boxes)[cls_mask]
+            scores = np.array(scores)[cls_mask]
+            classes = np.array(classes)[cls_mask]
             box_mask = get_points_inside_boxes(points=points, boxes=boxes)
+
             points, ptrans = frame_to_grid(
                 pts=points, grid_shape=grid_shape, VOX_SIZE=VOX_SIZE
             )
@@ -359,9 +485,17 @@ class ScanNet(BaseDataset):
                 upshift=0,
             )
 
-            grid_mask = get_points_inside_boxes(
-                grid_inds, box_filter_label_mapping(boxes, VOX_SIZE, ptrans)
-            )
+            low_res_boxes = box_filter_label_mapping(boxes, VOX_SIZE, ptrans)
+            # for idx, b in enumerate(low_res_boxes):
+            #     print(idx)
+            #     trimesh.points.PointCloud(b).convex_hull.export(
+            #         "box_{}.ply".format(idx)
+            #     )
+            # trimesh.points.PointCloud(grid_inds).export("Grid.ply")
+            grid_mask = get_points_inside_boxes(grid_inds, low_res_boxes)
+            # grid_mask = get_points_inside_boxes(
+            #     grid_inds, box_filter_label_mapping(boxes, VOX_SIZE, ptrans)
+            # )
             # t= trimesh.points.PointCloud(grid_inds[grid_mask]).export("ksf.ply")
             # print(depth_mapping_3d.shape)
 
@@ -418,10 +552,15 @@ class ScanNet(BaseDataset):
                 ptrans,
                 upshift=0,
             ).flatten()
+            import trimesh
 
-            grid_mask = get_points_inside_boxes(
-                grid_inds, box_filter_label_mapping(boxes, VOX_SIZE, ptrans)
-            )
+            low_res_boxes = box_filter_label_mapping(boxes, VOX_SIZE, ptrans)
+            # for idx, b in enumerate(low_res_boxes):
+            #     print(idx)
+            #     trimesh.points.PointCloud(b).convex_hull.export(
+            #         "box_{}.ply".format(idx)
+            #     )
+            grid_mask = get_points_inside_boxes(grid_inds, low_res_boxes)
             # t= trimesh.points.PointCloud(grid_inds[grid_mask]).export("ksf.ply")
             # print(depth_mapping_3d.shape)
 
@@ -436,8 +575,6 @@ class ScanNet(BaseDataset):
             gt[grid_mask == 0] = 255
 
             label_weight = grid_mask.astype(int)
-
-        label_weight = (depth_mapping_3d != 307200).astype(int)
 
         # sketch_gt = np.load(gt_path.replace('Label', 'sketch3D').replace('npz', 'npy')).astype(np.int64)
         # sketch_gt[tsdf==0]=0
@@ -499,6 +636,7 @@ class ScanNetSSCDataModule(pl.LightningDataModule):
             s3client=None,
             only_frustum=config.only_frustum,
             only_box=config.only_boxes,
+            overfit=config.overfit,
         )
 
         self.val_dataset = ScanNet(
@@ -509,14 +647,7 @@ class ScanNetSSCDataModule(pl.LightningDataModule):
             s3client=None,
             only_frustum=config.only_frustum,
             only_box=config.only_boxes,
-        )
-        self.val_loader = DataLoader(
-            self.val_dataset,
-            batch_size=1,  # config.batch_size,
-            num_workers=config.num_workers,
-            drop_last=False,
-            shuffle=False,
-            pin_memory=True,
+            overfit=config.overfit,
         )
         self.config = config
         # self.hparams = args

@@ -1,263 +1,123 @@
-#!/usr/bin/env python3
-# encoding: utf-8
+from __future__ import division
+
+import pycuda.driver as drv
+from pycuda import compiler
+import pycuda
+import os.path as osp
 import os
-import cv2
-import argparse
-import numpy as np
 import sys
-import torch
-import torch.nn as nn
-import torch.multiprocessing as mp
+import time
+import argparse
+import pdb
 
+# from typing_extensions import runtime
 from config import config, update_parameters_in_config
-from utils.pyt_utils import ensure_dir, link_file, load_model, parse_devices
-from utils.visualize import print_iou, show_img
-from engine.evaluator import Evaluator
-from engine.logger import get_logger
-from seg_opr.metric import hist_info, compute_score
-from nyu import NYUv2
-from scannet import ScanNet
 from network import Network
-from dataloader import ValPre
-from torch.utils.data import dataloader
-from torch.multiprocessing import reductions
-from multiprocessing.reduction import ForkingPickler
-
-logger = get_logger()
-
-
-default_collate_func = dataloader.default_collate
-
-torch.manual_seed(31)
-np.random.seed(31)
-def default_collate_override(batch):
-  dataloader._use_shared_memory = False
-  return default_collate_func(batch)
-
-setattr(dataloader, 'default_collate', default_collate_override)
-
-for t in torch._storage_classes:
-  if sys.version_info[0] == 2:
-    if t in ForkingPickler.dispatch:
-        del ForkingPickler.dispatch[t]
-  else:
-    if t in ForkingPickler._extra_reducers:
-        del ForkingPickler._extra_reducers[t]
+from scannet import ScanNetSSCDataModule
+from nyu import NYUDataModule
+import matplotlib.pyplot as plt
+from torch.nn import BatchNorm3d, BatchNorm2d
+from easydict import EasyDict as edict
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelSummary
+import torch
 
 
-class SegEvaluator(Evaluator):
-    def func_per_iteration(self, data, device):
-        img = data['data']
-        label = data['label']
-        hha = data['hha_img']
-        tsdf = data['tsdf']
-        label_weight = data['label_weight']
-        depth_mapping_3d = data['depth_mapping_3d']
-        import cv2
-        
-        name = data['fn']
-        sketch_gt = data['sketch_gt']
-        pred, pred_sketch = self.eval_ssc(img, hha, tsdf, depth_mapping_3d, sketch_gt, device)
+from pytorch_lightning.loggers import MLFlowLogger
+from pytorch_lightning.callbacks import (
+    LearningRateMonitor,
+    ModelCheckpoint,
+    DeviceStatsMonitor,
+)
+from pytorch_lightning.strategies import DDPStrategy
 
-        results_dict = {'pred':pred, 'label':label, 'label_weight':label_weight,
-                        'name':name, 'mapping':depth_mapping_3d}
-        pred = (pred.flatten() * label_weight).reshape([60,36,60])
-        if self.save_path is not None:
-            ensure_dir(self.save_path)
-            ensure_dir(self.save_path+'_sketch')
-            fn = name + '.npy'
-            np.save(os.path.join(self.save_path, fn), pred)
-            np.save(os.path.join(self.save_path+'_sketch', fn), pred_sketch)
-            logger.info('Save the pred npz ' + fn)
+parser = argparse.ArgumentParser()
+# port = str(int(float(time.time())) % 20)
+# os.environ["MASTER_PORT"] = str(10097 + int(port))
+parser.add_argument("--only_frustum", action="store_true")
+parser.add_argument("--only_boxes", action="store_true")
+parser.add_argument("--overfit", action="store_true")
+parser.add_argument("--debug", action="store_true")
+parser.add_argument("--prefix", type=str, default="dummy")
+parser.add_argument("--ckpt", type=str, default="dummy")
+parser.add_argument("--dataset", type=str, default="NYUv2")
+parser.add_argument("--num_epochs", type=int, default=200)
+parser.add_argument("--ew", type=int, default=1)
+parser.add_argument("--lr", type=float, default=0.1)
+args = parser.parse_args()
+logger = MLFlowLogger(experiment_name="Eval", run_name=args.prefix)
+update_parameters_in_config(
+    config,
+    ew=args.ew,
+    lr=args.lr,
+    num_epochs=args.num_epochs,
+    only_frustum=args.only_frustum,
+    only_boxes=args.only_boxes,
+    dataset=args.dataset,
+    prefix=args.prefix,
+    overfit=args.overfit,
+)
+config.num_classes = 3
+drv.init()
+print("%d device(s) found." % drv.Device.count())
+print(config)
+for ordinal in range(drv.Device.count()):
+    dev = drv.Device(ordinal)
+    print(ordinal, dev.name())
+if config.dataset == "NYUv2":
+    data_module = NYUDataModule(config)
+else:
+    data_module = ScanNetSSCDataModule(config)
 
-        return results_dict
+config.steps_per_epoch = len(data_module.train_dataloader())
+if args.ckpt == "dummy":
+    model = Network(
+        class_num=config.num_classes,
+        feature=128,
+        bn_momentum=config.bn_momentum,
+        pretrained_model=config.pretrained_model,
+        norm_layer=BatchNorm3d,
+        config=config,
+    )
+else:
+    model = Network(
+        class_num=config.num_classes,
+        feature=128,
+        bn_momentum=config.bn_momentum,
+        pretrained_model=config.pretrained_model,
+        norm_layer=BatchNorm3d,
+        config=config,
+    )
+    ckpt = torch.load(args.ckpt)
+    model.load_state_dict(ckpt["state_dict"])
+model.debug = args.debug
+lr_monitor = LearningRateMonitor(logging_interval="step")
+# TODO: add ckpt and metrics
+check_interval = 3
+ckpt = ModelCheckpoint(
+    every_n_epochs=check_interval,
+    save_top_k=2,
+    verbose=True,
+    mode="max",
+    monitor="val/sscmIOU",
+)
+# TODO Distributed evaluation as well
+trainer = pl.Trainer(
+    auto_lr_find=False,
+    devices=1,
+    strategy=DDPStrategy(),
+    # logger=mlflow_logger,
+    max_epochs=config.nepochs,
+    accelerator="gpu",
+    check_val_every_n_epoch=3 if config.dataset == "NYUv2" else 1,
+    val_check_interval=None if config.dataset == "NYUv2" else 500,
+    limit_val_batches=0.25,
+    log_every_n_steps=50,
+    callbacks=[lr_monitor, ckpt, ModelSummary()],
+    logger=logger,
+    # overfit_batches=1,  # if not args.overfit else 1,
+    # track_grad_norm=2,
+    detect_anomaly=True,
+)
 
-    def hist_info(self, n_cl, pred, gt):
-        assert (pred.shape == gt.shape)
-        k = (gt >= 0) & (gt < n_cl)  # exclude 255
-        labeled = np.sum(k)
-        correct = np.sum((pred[k] == gt[k]))
-
-        return np.bincount(n_cl * gt[k].astype(int) + pred[k].astype(int),
-                           minlength=n_cl ** 2).reshape(n_cl,
-                                                        n_cl), correct, labeled
-
-    def compute_metric(self, results):
-        hist_ssc = np.zeros((config.num_classes, config.num_classes))
-        correct_ssc = 0
-        labeled_ssc = 0
-
-        # scene completion
-        tp_sc, fp_sc, fn_sc, union_sc, intersection_sc = 0, 0, 0, 0, 0
-
-        for d in results:
-            pred = d['pred'].astype(np.int64)
-            label = d['label'].astype(np.int64)
-            label_weight = d['label_weight'].astype(np.float32)
-            mapping = d['mapping'].astype(np.int64).reshape(-1)
-
-            flat_pred = np.ravel(pred)
-            flat_label = np.ravel(label)
-
-            nonefree =np.where(label_weight > 0)  # Calculate the SSC metric. Exculde the seen atmosphere and the invalid 255 area
-            nonefree_pred = flat_pred[nonefree]
-            nonefree_label = flat_label[nonefree]
-
-            h_ssc, c_ssc, l_ssc = self.hist_info(config.num_classes, nonefree_pred, nonefree_label)
-            hist_ssc += h_ssc
-            correct_ssc += c_ssc
-            labeled_ssc += l_ssc
-
-            occluded = (mapping == 307200) & (label_weight > 0) & (flat_label != 255)   # Calculate the SC metric on the occluded area
-            occluded_pred = flat_pred[occluded]
-            occluded_label = flat_label[occluded]
-
-            tp_occ = ((occluded_label > 0) & (occluded_pred > 0)).astype(np.int8).sum()
-            fp_occ = ((occluded_label == 0) & (occluded_pred > 0)).astype(np.int8).sum()
-            fn_occ = ((occluded_label > 0) & (occluded_pred == 0)).astype(np.int8).sum()
-
-            union = ((occluded_label > 0) | (occluded_pred > 0)).astype(np.int8).sum()
-            intersection = ((occluded_label > 0) & (occluded_pred > 0)).astype(np.int8).sum()
-
-            tp_sc += tp_occ
-            fp_sc += fp_occ
-            fn_sc += fn_occ
-            union_sc += union
-            intersection_sc += intersection
-
-        score_ssc = compute_score(hist_ssc, correct_ssc, labeled_ssc)
-        IOU_sc = intersection_sc / union_sc
-        precision_sc = tp_sc / (tp_sc + fp_sc)
-        recall_sc = tp_sc / (tp_sc + fn_sc)
-        score_sc = [IOU_sc, precision_sc, recall_sc]
-        if self.runtime:
-           result_line, sscmIOU, sscPixel,scIOU,scPixel,scRecall = self.print_ssc_iou(score_sc, score_ssc)
-           return result_line,[sscmIOU, sscPixel,scIOU,scPixel,scRecall]
-        result_line = self.print_ssc_iou(score_sc, score_ssc)
-        return result_line
-
-    def eval_ssc(self, img, disp, tsdf, depth_mapping_3d, sketch_gt, device=None):
-        ori_rows, ori_cols, c = img.shape
-        
-        input_data, input_disp = self.process_image_rgbd(img, disp, crop_size=None)
-        print(input_data.sum(),input_disp.sum(),tsdf.sum(),depth_mapping_3d.sum(),sketch_gt.sum())
-
-        score, bin_score, sketch_score = self.val_func_process_ssc(input_data, input_disp, tsdf, depth_mapping_3d, sketch_gt, device)
-        score = score.permute(1, 2, 3, 0)       # h, w, z, c
-        sketch_score = sketch_score.permute(1, 2, 3, 0)
-
-        data_output = score.cpu().numpy()
-        sketch_output = sketch_score.cpu().numpy()
-        
-        pred = data_output.argmax(3)        # 60x36x60
-        pred_sketch = sketch_output.argmax(3)
-
-        return pred, pred_sketch
-
-    def val_func_process_ssc(self, input_data, input_disp, tsdf, input_mapping, sketch_gt, device=None):
-        input_data = np.ascontiguousarray(input_data[None, :, :, :], dtype=np.float32)
-        input_data = torch.FloatTensor(input_data).cuda(device)
-
-        input_disp = np.ascontiguousarray(input_disp[None, :, :, :], dtype=np.float32)
-        input_disp = torch.FloatTensor(input_disp).cuda(device)
-
-        input_mapping = np.ascontiguousarray(input_mapping[None, :], dtype=np.int32)
-        input_mapping = torch.LongTensor(input_mapping).cuda(device)
-
-        tsdf = np.ascontiguousarray(tsdf[None, :], dtype=np
-        .float32)
-        tsdf = torch.FloatTensor(tsdf).cuda(device)
-
-        with torch.cuda.device(input_data.get_device()):
-            self.val_func.eval()
-            self.val_func.to(input_data.get_device())
-            with torch.no_grad():
-                score, bin_score, sketch_score = self.val_func(input_data.float(), input_mapping.long(), tsdf.float())
-                score = score[0]
-                sketch_score = sketch_score[0]
-
-                # if self.is_flip:
-                #     input_data = input_data.flip(-1)
-                #     input_disp = input_disp.flip(-1)
-                #     score_flip = self.val_func(input_data, input_disp)
-                #     score_flip = score_flip[0]
-                #     score += score_flip.flip(-1)
-                score = torch.exp(score)
-
-        return score, bin_score, sketch_score
-
-    def print_ssc_iou(self, sc, ssc):
-        lines = []
-        lines.append('--*-- Semantic Scene Completion --*--')
-        lines.append('IOU: \n{}\n'.format(str(ssc[0].tolist())))
-        lines.append('meanIOU: %f\n' % ssc[2])
-        lines.append('pixel-accuracy: %f\n' % ssc[3])
-        lines.append('')
-        lines.append('--*-- Scene Completion --*--\n')
-        lines.append('IOU: %f\n' % sc[0])
-        lines.append('pixel-accuracy: %f\n' % sc[1])  # 0 和 1 类的IOU
-        lines.append('recall: %f\n' % sc[2])
-
-        line = "\n".join(lines)
-        print(line)
-        if self.runtime:
-            sscmIOU = ssc[2]
-            sscPixel = ssc[3]
-            scIOU = sc[0]
-            scPixel = sc[1]
-            scRecall = sc[2]
-            return line,sscmIOU, sscPixel,scIOU,scPixel,scRecall
-        return line
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-e', '--epochs', default='last', type=str)
-    parser.add_argument('--snapshot-dir', default='idontexist', type=str)
-    parser.add_argument('-d', '--devices', default='1', type=str)
-    parser.add_argument('-v', '--verbose', default=False, action='store_true')
-    parser.add_argument('--show_image', '-s', default=False,
-                        action='store_true')
-    parser.add_argument('--save_path', '-p', default='results')
-    parser.add_argument('--lr', type=float,
-                       default=0.1,
-                       dest="lr",
-                   help='Learning rate for experiments')
-    parser.add_argument('--ew', type=float,
-                       default=1.0,
-                       dest="ew",
-                       help='Empty voxel weight for experiments')
-    parser.add_argument('--num_epochs', type=int,
-                       default=250,
-                       dest="num_epochs",
-                        help='Number of epochs to train for experiments')
-    parser.add_argument('--only_frustum', dest='only_frustum', type=bool,default=False)
-    parser.add_argument('--only_boxes', dest='only_boxes', type=bool,default=False)
-    parser.add_argument('--dataset',type=str,default="NYUv2",dest='dataset')
-
-    args = parser.parse_args()
-    all_dev = parse_devices(args.devices)
-
-    update_parameters_in_config(config,ew=args.ew,lr=args.lr,num_epochs=args.num_epochs,only_frustum=args.only_frustum,only_boxes=args.only_boxes,dataset=args.dataset)
-    network = Network(class_num=config.num_classes, feature=128, bn_momentum=config.bn_momentum,
-                norm_layer=nn.BatchNorm3d, eval=True)
-    data_setting = {'img_root': config.img_root_folder,
-                    'gt_root': config.gt_root_folder,
-                    'hha_root':config.hha_root_folder,
-                    'mapping_root': config.mapping_root_folder,
-                    'train_source': config.train_source,
-                    'eval_source': config.eval_source,
-                    'dataset_path': config.dataset_path}
-    val_pre = ValPre()
-    if args.dataset == "scannet":
-      dataset = ScanNet(data_setting, 'val', val_pre,only_frustum=args.only_frustum,only_box=args.only_boxes)
-    else:
-      dataset = NYUv2(data_setting, 'val', val_pre)
-
-    with torch.no_grad():
-        segmentor = SegEvaluator(dataset, config.num_classes, config.image_mean,
-                                 config.image_std, network,
-                                 config.eval_scale_array, config.eval_flip,
-                                 all_dev, args.verbose, args.save_path,
-                                 args.show_image)
-        segmentor.run(args.snapshot_dir, args.epochs, config.val_log_file,
-                      config.link_val_log_file)
+trainer.validate(model, datamodule=data_module)  # train(FLAGS)

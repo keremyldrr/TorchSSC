@@ -84,9 +84,8 @@ def compute_metric(config, results, confusion=False):
         pred = d["pred"].astype(np.int64)
         label = d["label"].cpu().numpy()[0].astype(np.int64)
 
-        if config.dataset != "NYUv2":
-            label[label == 3] = 1
-            label[label == 5] = 2
+        label[label == 3] = 1
+        label[label == 5] = 2
         label_weight = d["label_weight"].cpu().numpy()[0].astype(np.float32)
         mapping = d["mapping"].cpu().numpy().astype(np.int64).reshape(-1)
         # print(pred.shape,label.shape,label_weight.shape,mapping.shape)

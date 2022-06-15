@@ -9,6 +9,7 @@ import sys
 import time
 import argparse
 import pdb
+import pprint
 
 # from typing_extensions import runtime
 from config import config, update_parameters_in_config
@@ -22,7 +23,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelSummary
 
 
-from pytorch_lightning.loggers import NeptuneLogger, TensorBoardLogger, MLFlowLogger
+from pytorch_lightning.loggers import MLFlowLogger
 from pytorch_lightning.callbacks import (
     LearningRateMonitor,
     ModelCheckpoint,
@@ -30,17 +31,20 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.strategies import DDPStrategy
 
+pl.seed_everything(42)
 parser = argparse.ArgumentParser()
 port = str(int(float(time.time())) % 20)
 os.environ["MASTER_PORT"] = str(10097 + int(port))
 parser.add_argument("--only_frustum", action="store_true")
 parser.add_argument("--only_boxes", action="store_true")
+parser.add_argument("--overfit", action="store_true")
 parser.add_argument("--prefix", type=str, default="dummy")
 parser.add_argument("--dataset", type=str, default="NYUv2")
 parser.add_argument("--num_epochs", type=int, default=200)
 parser.add_argument("--ew", type=int, default=1)
 parser.add_argument("--lr", type=float, default=0.1)
 args = parser.parse_args()
+logger = MLFlowLogger(run_name=args.prefix)
 update_parameters_in_config(
     config,
     ew=args.ew,
@@ -50,6 +54,7 @@ update_parameters_in_config(
     only_boxes=args.only_boxes,
     dataset=args.dataset,
     prefix=args.prefix,
+    overfit=args.overfit,
 )
 drv.init()
 print("%d device(s) found." % drv.Device.count())
@@ -61,7 +66,9 @@ if config.dataset == "NYUv2":
     data_module = NYUDataModule(config)
 else:
     data_module = ScanNetSSCDataModule(config)
+    config.num_classes = 3
 
+config.steps_per_epoch = len(data_module.train_dataloader())
 model = Network(
     class_num=config.num_classes,
     feature=128,
@@ -70,7 +77,9 @@ model = Network(
     norm_layer=BatchNorm3d,
     config=config,
 )
-lr_monitor = LearningRateMonitor(logging_interval="epoch")
+lr_monitor = LearningRateMonitor(logging_interval="step")
+
+pprint.pprint(config)
 # TODO: add ckpt and metrics
 check_interval = 3
 ckpt = ModelCheckpoint(
@@ -91,7 +100,8 @@ trainer = pl.Trainer(
     val_check_interval=None if config.dataset == "NYUv2" else 500,
     limit_val_batches=0.25,
     log_every_n_steps=50,
-    callbacks=[lr_monitor, ckpt, ModelSummary(max_depth=-1)],
+    callbacks=[lr_monitor, ckpt, ModelSummary()],
+    logger=logger,
     # overfit_batches=1,  # if not args.overfit else 1,
     # track_grad_norm=2,
     detect_anomaly=True,

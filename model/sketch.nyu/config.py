@@ -13,18 +13,18 @@ from easydict import EasyDict as edict
 import argparse
 
 
-def update_logpath_in_config(C, log):
-    C.log_dir = osp.abspath(log)
-    C.tb_dir = osp.abspath(osp.join(C.log_dir, "tb"))
+# def update_logpath_in_config(C, log):
+#     C.log_dir = osp.abspath(log)
+#     C.tb_dir = osp.abspath(osp.join(C.log_dir, "tb"))
 
-    C.log_dir_link = osp.join(C.abs_dir, "log")
-    C.snapshot_dir = osp.abspath(osp.join(C.log_dir, "snapshot"))
+#     C.log_dir_link = osp.join(C.abs_dir, "log")
+#     C.snapshot_dir = osp.abspath(osp.join(C.log_dir, "snapshot"))
 
-    exp_time = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())
-    C.log_file = C.log_dir + "/log_" + exp_time + ".log"
-    C.link_log_file = C.log_file + "/log_last.log"
-    C.val_log_file = C.log_dir + "/_" + exp_time + ".lovalg"
-    C.link_val_log_file = C.log_dir + "/val_last.log"
+#     exp_time = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())
+#     C.log_file = C.log_dir + "/log_" + exp_time + ".log"
+#     C.link_log_file = C.log_file + "/log_last.log"
+#     C.val_log_file = C.log_dir + "/_" + exp_time + ".lovalg"
+#     C.link_val_log_file = C.log_dir + "/val_last.log"
 
 
 def update_parameters_in_config(
@@ -34,28 +34,30 @@ def update_parameters_in_config(
     num_epochs=200,
     only_frustum=False,
     only_boxes=False,
+    overfit=False,
     dataset="NYUv2",
     prefix="",
 ):
-    C.log_dir = osp.abspath("log")
-    C.tb_dir = osp.abspath(osp.join(C.log_dir, "tb"))
+    # C.log_dir = osp.abspath("log")
+    # C.tb_dir = osp.abspath(osp.join(C.log_dir, "tb"))
 
-    C.log_dir_link = osp.join(C.abs_dir, "log")
-    C.snapshot_dir = osp.abspath(osp.join(C.log_dir, "snapshot"))
+    # C.log_dir_link = osp.join(C.abs_dir, "log")
+    # C.snapshot_dir = osp.abspath(osp.join(C.log_dir, "snapshot"))
 
-    exp_time = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())
-    C.log_file = C.log_dir + "/log_" + exp_time + ".log"
-    C.link_log_file = C.log_file + "/log_last.log"
-    C.val_log_file = C.log_dir + "/_" + exp_time + ".lovalg"
-    C.link_val_log_file = C.log_dir + "/val_last.log"
+    # exp_time = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())
+    # C.log_file = C.log_dir + "/log_" + exp_time + ".log"
+    # C.link_log_file = C.log_file + "/log_last.log"
+    # C.val_log_file = C.log_dir + "/_" + exp_time + ".lovalg"
+    # C.link_val_log_file = C.log_dir + "/val_last.log"
 
     """Data Dir and Weight Dir"""
 
-    C.is_test = False
+    # C.is_test = False
 
     """Path Config"""
 
     C.only_boxes = only_boxes
+    C.overfit = overfit
     if dataset == "NYUv2":
         C.dataset_path = osp.join(C.volna, "DATA/NYU/")
         C.train_source = osp.join(C.dataset_path, "train.txt")
@@ -66,6 +68,23 @@ def update_parameters_in_config(
         C.image_std = np.array([0.229, 0.224, 0.225])
         C.background = 255
         C.nepochs = 250
+        C.type2class = {
+            "background": 0,
+            "bed": 1,
+            "books": 2,
+            "ceiling": 3,
+            "chair": 4,
+            "floor": 5,
+            "furniture": 6,
+            "objects": 7,
+            "painting": 8,
+            "sofa": 9,
+            "table": 10,
+            "tv": 11,
+            "wall": 12,
+            "window": 13,
+        }
+
     elif dataset == "scannet":
         C.dataset_path = osp.join(C.volna, "DATA/ScanNet/")
         C.train_source = osp.join(C.dataset_path, "train_subset.txt")
@@ -75,6 +94,27 @@ def update_parameters_in_config(
         C.dataset = "ScanNet"
         C.num_classes = 19
 
+        C.type2class = {
+            "empty": 0,
+            "cabinet": 1,
+            "bed": 2,
+            "chair": 3,
+            "sofa": 4,
+            "table": 5,
+            "door": 6,
+            "window": 7,
+            "bookshelf": 8,
+            "picture": 9,
+            "counter": 10,
+            "desk": 11,
+            "curtain": 12,
+            "refrigerator": 13,
+            "showercurtrain": 14,
+            "toilet": 15,
+            "sink": 16,
+            "bathtub": 17,
+            "garbagebin": 18,
+        }
         C.image_mean = np.array([109.8, 97.2, 83.8]) / 255
 
         C.image_std = np.array([1, 1, 1])
@@ -106,7 +146,7 @@ def update_parameters_in_config(
     C.batch_size = 2
     C.nepochs = 250
     C.niters_per_epoch = C.num_train_imgs // C.batch_size
-    C.num_workers = C.batch_size
+    C.num_workers = 4
 
     C.train_scale_array = [1]
     C.warm_up_epoch = 0
@@ -138,10 +178,10 @@ def update_parameters_in_config(
     C.niters_per_epoch = C.num_train_imgs // C.batch_size
     C.only_frustum = only_frustum
     C.only_boxes = only_boxes
-    logdir = "logs/{}_{}_ew_{}_lr_{}_of_{}_ob_{}".format(
-        prefix, dataset, ew, lr, int(only_frustum), int(only_boxes)
-    )
-    update_logpath_in_config(C, logdir)
+    # logdir = "logs/{}_{}_ew_{}_lr_{}_of_{}_ob_{}".format(
+    #     prefix, dataset, ew, lr, int(only_frustum), int(only_boxes)
+    # )
+    # update_logpath_in_config(C, logdir)
 
 
 C = edict()
