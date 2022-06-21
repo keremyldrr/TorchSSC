@@ -38,7 +38,7 @@ def hist_info(n_cl, pred, gt):
 
     return (
         np.bincount(
-            n_cl * gt[k].astype(int) + pred[k].astype(int), minlength=n_cl**2
+            n_cl * gt[k].astype(int) + pred[k].astype(int), minlength=n_cl ** 2
         ).reshape(n_cl, n_cl),
         correct,
         labeled,

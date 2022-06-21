@@ -1,4 +1,5 @@
 from seg_opr.metric import hist_info, compute_score
+import pdb
 import numpy as np
 from sc_utils import export_grid
 
@@ -38,7 +39,7 @@ def hist_info(n_cl, pred, gt):
 
     return (
         np.bincount(
-            n_cl * gt[k].astype(int) + pred[k].astype(int), minlength=n_cl**2
+            n_cl * gt[k].astype(int) + pred[k].astype(int), minlength=n_cl ** 2
         ).reshape(n_cl, n_cl),
         correct,
         labeled,
@@ -80,10 +81,13 @@ def compute_metric(config, results, confusion=False):
     # print("Confusion", confusion)
     if confusion:
         conf_mat = np.zeros([config.num_classes, config.num_classes], dtype=np.int64)
+
     for d in results:
+        # pdb.set_trace()
         pred = d["pred"].astype(np.int64)
         label = d["label"].cpu().numpy()[0].astype(np.int64)
 
+        # HACK Ugly
         if config.dataset != "NYUv2":
             label[label == 3] = 1
             label[label == 5] = 2
@@ -103,7 +107,6 @@ def compute_metric(config, results, confusion=False):
                 if targ != 255:
                     # print(out,targ)
                     conf_mat[out, targ] += 1
-
         h_ssc, c_ssc, l_ssc = hist_info(
             config.num_classes, nonefree_pred, nonefree_label
         )
@@ -159,12 +162,12 @@ def compute_metric(config, results, confusion=False):
     precision_sc = tp_sc / (tp_sc + fp_sc)
     recall_sc = tp_sc / (tp_sc + fn_sc)
     score_sc = [IOU_sc, precision_sc, recall_sc]
-    result_line, sscmIOU, sscPixel, scIOU, scPixel, scRecall = print_ssc_iou(
-        score_sc, score_ssc, type2class=config.type2class
-    )
-    if confusion:
-        print(conf_mat)
-        conf_mat.tofile("conf_mat.csv", sep=",")
-    return result_line, [sscmIOU, sscPixel, scIOU, scPixel, scRecall]
+    # if confusion:
+    #     print(conf_mat)
+    #     conf_mat.tofile("conf_mat.csv", sep=",")
+    return (
+        score_sc,
+        score_ssc,
+    )  # result_line, [sscmIOU, sscPixel, scIOU, scPixel, scRecall]
     # result_line = self.print_ssc_iou(score_sc, score_ssc)
     # return result_line

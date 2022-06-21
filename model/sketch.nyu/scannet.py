@@ -4,7 +4,8 @@ from distutils.log import error
 from logging import warning
 import numpy as np
 import torch
-from datasets.BaseDataset import BaseDataset
+
+# from datasets.BaseDataset import BaseDataset
 from torch.utils.data import DataLoader
 import os
 import pytorch_lightning as pl
@@ -32,8 +33,19 @@ from sc_utils import (
     box_filter_label_mapping,
     get_axis_aligned_matrix,
 )
-
+from torch.utils.data.dataloader import default_collate
 import time
+
+
+def my_collate(batch):
+    "Puts each data field into a tensor with outer dimension batch size"
+    batch = [x for x in batch if x is not None]
+    if len(batch) == 0:
+        return None
+        # print("ALL GONE")
+    res = default_collate(batch)
+
+    return res
 
 
 class TrainPre(object):
@@ -60,7 +72,7 @@ class ValPre(object):
         return img.astype(np.float), extra_dict
 
 
-class ScanNet(BaseDataset):
+class ScanNet:
     def __init__(
         self,
         setting,
@@ -72,6 +84,7 @@ class ScanNet(BaseDataset):
         only_box=False,
         classes=[2, 4],
         overfit=False,
+        thresholds=[0.3, 1.0],
     ):
         # super(ScanNet, self).__init__(setting, split_name, preprocess, file_length)
         self.classes = classes
@@ -94,6 +107,7 @@ class ScanNet(BaseDataset):
         self.only_frustum = only_frustum
         self.thresh = 0.3
         self.only_box = only_box
+        self.thresholds = thresholds
 
     def read_ceph_img(self, mode, value):
         img_array = np.fromstring(value, dtype=np.uint8)
@@ -118,6 +132,9 @@ class ScanNet(BaseDataset):
         value_buf = io.BytesIO(value_buf)
         array = np.load(value_buf)
         return array
+
+    def __len__(self):
+        return len(self._file_names)
 
     # def _get_file_names(self, split_name):
     #     assert split_name in ["train", "val"]
@@ -173,6 +190,7 @@ class ScanNet(BaseDataset):
             classes = np.array([float(a[:-4].split("_")[3]) for a in objs_in_scene])
             cls_mask = np.array([cls in self.classes for cls in classes])
             scores = scores[cls_mask]
+
             # pdb.set_trace()
             for c in self.classes:
                 if cls_mask.sum() > 0:
@@ -210,28 +228,16 @@ class ScanNet(BaseDataset):
         if self.overfit:
             # return [["scene0030_01_2", None]]
             return [
-                # ["scene0407_00_4", None],
-                # ["scene0575_02_25", None]
+                ["scene0407_00_4", None],
+                ["scene0575_02_25", None],
                 ["scene0015_00_2", None],
-                ["scene0015_00_2", None],
-                ["scene0015_00_2", None],
-                ["scene0015_00_2", None],
-                ["scene0015_00_2", None],
-                ["scene0015_00_2", None],
-                ["scene0015_00_2", None],
-                ["scene0015_00_2", None],
-                # ["scene0030_01_1", None],
-                # ["scene0030_01_1", None],
-                # ["scene0030_01_1", None],
-                # ["scene0030_01_1", None],
-                # ["scene0030_01_1", None],
-                # ["scene0030_01_1", None],
-                # ["scene0030_01_1", None],
-                # ["scene0030_01_1", None],
+                ["scene0030_01_1", None],
+                ["scene0685_02_4", None],
+                ["scene0655_01_9", None],
+                ["scene0000_00_3", None],
             ]
             # ]
 
-            # return [["scene0685_02_4", None]]
             # return file_names[16:24]
             # return [["scene0015_00_2", None]]
             # return [["scene0575_02_25", None]]
@@ -333,6 +339,27 @@ class ScanNet(BaseDataset):
             pose_path,
             axis_align_matrix,
         )
+        if (
+            (tsdf is None)
+            and (img is None)
+            and (hha is None)
+            and (label_weight is None)
+            and (gt is None)
+            and (sketch_gt is None)
+        ):
+
+            output_dict = dict(
+                data=None,
+                label=None,
+                label_weight=None,
+                depth_mapping_3d=None,
+                tsdf=None,
+                sketch_gt=None,
+                fn=str(item_name),
+                n=len(self._file_names),
+            )
+            return None
+
         # print("KMG",img)
         # print(np.unique(gt))
         # gt[gt > 12]=0
@@ -449,10 +476,26 @@ class ScanNet(BaseDataset):
             boxes, classes, scores = get_instance_boxes(
                 instancedir=instancedir, with_classes=True, thresh=self.thresh
             )
+
             cls_mask = np.array([a in self.classes for a in classes])
+            prev = self.thresholds[0]
+            b = self.thresholds[1]
+            vis_mask = (scores > prev) & (scores <= b)
+            cls_mask = cls_mask & vis_mask
+
+            if cls_mask.sum() == 0:
+                return None, None, None, None, None, None, None
+            # scores = scores[vis_mask]
             boxes = np.array(boxes)[cls_mask]
             scores = np.array(scores)[cls_mask]
             classes = np.array(classes)[cls_mask]
+
+            # prev = 0.5
+            # b = 1.0
+            # vis_mask = (
+            #     (scores > prev) & (scores <= b)
+            # )
+            # scores = scores[vis_mask]
             box_mask = get_points_inside_boxes(points=points, boxes=boxes)
 
             points, ptrans = frame_to_grid(
@@ -552,7 +595,7 @@ class ScanNet(BaseDataset):
                 ptrans,
                 upshift=0,
             ).flatten()
-            import trimesh
+            # import trimesh
 
             low_res_boxes = box_filter_label_mapping(boxes, VOX_SIZE, ptrans)
             # for idx, b in enumerate(low_res_boxes):
@@ -565,16 +608,17 @@ class ScanNet(BaseDataset):
             # print(depth_mapping_3d.shape)
 
             # depth_mapping_3d[grid_mask == 0 ] = 307200
-            gt[(tsdf == 0) | (tsdf == 1)] = 0
             # print("dsfdsf")
             gt = get_label_bbox(gt, grid_shape)
-            label_weight[(tsdf == 0) | (tsdf == 1) & (gt == 255)] = 0
+            gt[(tsdf == 0) | (tsdf == 1)] = 0
+            gt[grid_mask == 0] = 255
+            label_weight[ ((tsdf == 0) | (tsdf == 1))] = 0
+            label_weight *=grid_mask
             # gt[(tsdf == 0) | (tsdf > 0) | (tsdf  == -1) ]= 255# getting only inside of the frustum
             #            print("Only FRUSTUM!!!!")
             sketch_gt[gt == 255] = 0
-            gt[grid_mask == 0] = 255
-
-            label_weight = grid_mask.astype(int)
+            sketch_gt *=grid_mask
+            # label_weight = grid_mask.astype(int)
 
         # sketch_gt = np.load(gt_path.replace('Label', 'sketch3D').replace('npz', 'npy')).astype(np.int64)
         # sketch_gt[tsdf==0]=0
@@ -613,7 +657,7 @@ class ScanNet(BaseDataset):
 
 
 class ScanNetSSCDataModule(pl.LightningDataModule):
-    def __init__(self, config):
+    def __init__(self, config, thresholds):
         super().__init__()
 
         data_setting = {
@@ -637,6 +681,7 @@ class ScanNetSSCDataModule(pl.LightningDataModule):
             only_frustum=config.only_frustum,
             only_box=config.only_boxes,
             overfit=config.overfit,
+            thresholds=thresholds,
         )
 
         self.val_dataset = ScanNet(
@@ -648,6 +693,7 @@ class ScanNetSSCDataModule(pl.LightningDataModule):
             only_frustum=config.only_frustum,
             only_box=config.only_boxes,
             overfit=config.overfit,
+            thresholds=thresholds,
         )
         self.config = config
         # self.hparams = args
@@ -671,23 +717,24 @@ class ScanNetSSCDataModule(pl.LightningDataModule):
             self.train_dataset,
             batch_size=self.config.batch_size,
             num_workers=self.config.num_workers,
-            drop_last=True,
+            # drop_last=True,
             shuffle=True,
             pin_memory=True,
+            collate_fn=my_collate,
         )
         return train_loader
 
     def val_dataloader(self):
-        return [
-            DataLoader(
-                self.val_dataset,
-                batch_size=1,  # self.config.batch_size,
-                shuffle=False,
-                num_workers=2,
-                pin_memory=True,
-            ),
-            # self.train_subset_dataloader(),
-        ]
+        # print(len(self.val_dataset))
+        d_loader = DataLoader(
+            self.val_dataset,
+            batch_size=1,  # self.config.batch_size,
+            shuffle=False,
+            num_workers=2,
+            pin_memory=True,
+            collate_fn=my_collate,
+        )
+        return [d_loader]
 
     # TODO  Implement smaller train_mini and validation, maybe just alter the filename list
     def train_subset_dataloader(self):

@@ -12,13 +12,33 @@ import torch.nn as nn
 
 
 class ConvBnRelu(nn.Module):
-    def __init__(self, in_planes, out_planes, ksize, stride, pad, dilation=1,
-                 groups=1, has_bn=True, norm_layer=nn.BatchNorm2d, bn_eps=1e-5,
-                 has_relu=True, inplace=True, has_bias=False):
+    def __init__(
+        self,
+        in_planes,
+        out_planes,
+        ksize,
+        stride,
+        pad,
+        dilation=1,
+        groups=1,
+        has_bn=True,
+        norm_layer=nn.BatchNorm2d,
+        bn_eps=1e-5,
+        has_relu=True,
+        inplace=True,
+        has_bias=False,
+    ):
         super(ConvBnRelu, self).__init__()
-        self.conv = nn.Conv2d(in_planes, out_planes, kernel_size=ksize,
-                              stride=stride, padding=pad,
-                              dilation=dilation, groups=groups, bias=has_bias)
+        self.conv = nn.Conv2d(
+            in_planes,
+            out_planes,
+            kernel_size=ksize,
+            stride=stride,
+            padding=pad,
+            dilation=dilation,
+            groups=groups,
+            bias=has_bias,
+        )
         self.has_bn = has_bn
         if self.has_bn:
             self.bn = norm_layer(out_planes, eps=bn_eps)
@@ -37,18 +57,41 @@ class ConvBnRelu(nn.Module):
 
 
 class SeparableConvBnRelu(nn.Module):
-    def __init__(self, in_channels, out_channels,
-                 kernel_size=1, stride=1, padding=0, dilation=1,
-                 has_relu=True, norm_layer=nn.BatchNorm2d):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size=1,
+        stride=1,
+        padding=0,
+        dilation=1,
+        has_relu=True,
+        norm_layer=nn.BatchNorm2d,
+    ):
         super(SeparableConvBnRelu, self).__init__()
 
-        self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size, stride,
-                               padding, dilation, groups=in_channels,
-                               bias=False)
+        self.conv1 = nn.Conv2d(
+            in_channels,
+            in_channels,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups=in_channels,
+            bias=False,
+        )
         self.bn = norm_layer(in_channels)
-        self.point_wise_cbr = ConvBnRelu(in_channels, out_channels, 1, 1, 0,
-                                         has_bn=True, norm_layer=norm_layer,
-                                         has_relu=has_relu, has_bias=False)
+        self.point_wise_cbr = ConvBnRelu(
+            in_channels,
+            out_channels,
+            1,
+            1,
+            0,
+            has_bn=True,
+            norm_layer=norm_layer,
+            has_relu=has_relu,
+            has_bias=False,
+        )
 
     def forward(self, x):
         x = self.conv1(x)
@@ -78,7 +121,7 @@ class SELayer(nn.Module):
             nn.Linear(in_planes, out_planes // reduction),
             nn.ReLU(inplace=True),
             nn.Linear(out_planes // reduction, out_planes),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
         self.out_planes = out_planes
 
@@ -104,15 +147,36 @@ class ChannelAttention(nn.Module):
 
 
 class BNRefine(nn.Module):
-    def __init__(self, in_planes, out_planes, ksize, has_bias=False,
-                 has_relu=False, norm_layer=nn.BatchNorm2d, bn_eps=1e-5):
+    def __init__(
+        self,
+        in_planes,
+        out_planes,
+        ksize,
+        has_bias=False,
+        has_relu=False,
+        norm_layer=nn.BatchNorm2d,
+        bn_eps=1e-5,
+    ):
         super(BNRefine, self).__init__()
-        self.conv_bn_relu = ConvBnRelu(in_planes, out_planes, ksize, 1,
-                                       ksize // 2, has_bias=has_bias,
-                                       norm_layer=norm_layer, bn_eps=bn_eps)
-        self.conv_refine = nn.Conv2d(out_planes, out_planes, kernel_size=ksize,
-                                     stride=1, padding=ksize // 2, dilation=1,
-                                     bias=has_bias)
+        self.conv_bn_relu = ConvBnRelu(
+            in_planes,
+            out_planes,
+            ksize,
+            1,
+            ksize // 2,
+            has_bias=has_bias,
+            norm_layer=norm_layer,
+            bn_eps=bn_eps,
+        )
+        self.conv_refine = nn.Conv2d(
+            out_planes,
+            out_planes,
+            kernel_size=ksize,
+            stride=1,
+            padding=ksize // 2,
+            dilation=1,
+            bias=has_bias,
+        )
         self.has_relu = has_relu
         if self.has_relu:
             self.relu = nn.ReLU(inplace=False)
@@ -126,18 +190,45 @@ class BNRefine(nn.Module):
 
 
 class RefineResidual(nn.Module):
-    def __init__(self, in_planes, out_planes, ksize, has_bias=False,
-                 has_relu=False, norm_layer=nn.BatchNorm2d, bn_eps=1e-5):
+    def __init__(
+        self,
+        in_planes,
+        out_planes,
+        ksize,
+        has_bias=False,
+        has_relu=False,
+        norm_layer=nn.BatchNorm2d,
+        bn_eps=1e-5,
+    ):
         super(RefineResidual, self).__init__()
-        self.conv_1x1 = nn.Conv2d(in_planes, out_planes, kernel_size=1,
-                                  stride=1, padding=0, dilation=1,
-                                  bias=has_bias)
-        self.cbr = ConvBnRelu(out_planes, out_planes, ksize, 1,
-                              ksize // 2, has_bias=has_bias,
-                              norm_layer=norm_layer, bn_eps=bn_eps)
-        self.conv_refine = nn.Conv2d(out_planes, out_planes, kernel_size=ksize,
-                                     stride=1, padding=ksize // 2, dilation=1,
-                                     bias=has_bias)
+        self.conv_1x1 = nn.Conv2d(
+            in_planes,
+            out_planes,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            dilation=1,
+            bias=has_bias,
+        )
+        self.cbr = ConvBnRelu(
+            out_planes,
+            out_planes,
+            ksize,
+            1,
+            ksize // 2,
+            has_bias=has_bias,
+            norm_layer=norm_layer,
+            bn_eps=bn_eps,
+        )
+        self.conv_refine = nn.Conv2d(
+            out_planes,
+            out_planes,
+            kernel_size=ksize,
+            stride=1,
+            padding=ksize // 2,
+            dilation=1,
+            bias=has_bias,
+        )
         self.has_relu = has_relu
         if self.has_relu:
             self.relu = nn.ReLU(inplace=False)
@@ -153,18 +244,33 @@ class RefineResidual(nn.Module):
 
 # For BiSeNet
 class AttentionRefinement(nn.Module):
-    def __init__(self, in_planes, out_planes,
-                 norm_layer=nn.BatchNorm2d):
+    def __init__(self, in_planes, out_planes, norm_layer=nn.BatchNorm2d):
         super(AttentionRefinement, self).__init__()
-        self.conv_3x3 = ConvBnRelu(in_planes, out_planes, 3, 1, 1,
-                                   has_bn=True, norm_layer=norm_layer,
-                                   has_relu=True, has_bias=False)
+        self.conv_3x3 = ConvBnRelu(
+            in_planes,
+            out_planes,
+            3,
+            1,
+            1,
+            has_bn=True,
+            norm_layer=norm_layer,
+            has_relu=True,
+            has_bias=False,
+        )
         self.channel_attention = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
-            ConvBnRelu(out_planes, out_planes, 1, 1, 0,
-                       has_bn=True, norm_layer=norm_layer,
-                       has_relu=False, has_bias=False),
-            nn.Sigmoid()
+            ConvBnRelu(
+                out_planes,
+                out_planes,
+                1,
+                1,
+                0,
+                has_bn=True,
+                norm_layer=norm_layer,
+                has_relu=False,
+                has_bias=False,
+            ),
+            nn.Sigmoid(),
         )
 
     def forward(self, x):
@@ -176,21 +282,44 @@ class AttentionRefinement(nn.Module):
 
 
 class FeatureFusion(nn.Module):
-    def __init__(self, in_planes, out_planes,
-                 reduction=1, norm_layer=nn.BatchNorm2d):
+    def __init__(self, in_planes, out_planes, reduction=1, norm_layer=nn.BatchNorm2d):
         super(FeatureFusion, self).__init__()
-        self.conv_1x1 = ConvBnRelu(in_planes, out_planes, 1, 1, 0,
-                                   has_bn=True, norm_layer=norm_layer,
-                                   has_relu=True, has_bias=False)
+        self.conv_1x1 = ConvBnRelu(
+            in_planes,
+            out_planes,
+            1,
+            1,
+            0,
+            has_bn=True,
+            norm_layer=norm_layer,
+            has_relu=True,
+            has_bias=False,
+        )
         self.channel_attention = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
-            ConvBnRelu(out_planes, out_planes // reduction, 1, 1, 0,
-                       has_bn=False, norm_layer=norm_layer,
-                       has_relu=True, has_bias=False),
-            ConvBnRelu(out_planes // reduction, out_planes, 1, 1, 0,
-                       has_bn=False, norm_layer=norm_layer,
-                       has_relu=False, has_bias=False),
-            nn.Sigmoid()
+            ConvBnRelu(
+                out_planes,
+                out_planes // reduction,
+                1,
+                1,
+                0,
+                has_bn=False,
+                norm_layer=norm_layer,
+                has_relu=True,
+                has_bias=False,
+            ),
+            ConvBnRelu(
+                out_planes // reduction,
+                out_planes,
+                1,
+                1,
+                0,
+                has_bn=False,
+                norm_layer=norm_layer,
+                has_relu=False,
+                has_bias=False,
+            ),
+            nn.Sigmoid(),
         )
 
     def forward(self, x1, x2):

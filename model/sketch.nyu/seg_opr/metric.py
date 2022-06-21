@@ -2,19 +2,23 @@
 
 import numpy as np
 
-np.seterr(divide='ignore', invalid='ignore')
+np.seterr(divide="ignore", invalid="ignore")
 
 
 # voc cityscapes metric
 def hist_info(n_cl, pred, gt):
-    assert (pred.shape == gt.shape)
+    assert pred.shape == gt.shape
     k = (gt >= 0) & (gt < n_cl)
     labeled = np.sum(k)
     correct = np.sum((pred[k] == gt[k]))
 
-    return np.bincount(n_cl * gt[k].astype(int) + pred[k].astype(int),
-                       minlength=n_cl ** 2).reshape(n_cl,
-                                                    n_cl), labeled, correct
+    return (
+        np.bincount(
+            n_cl * gt[k].astype(int) + pred[k].astype(int), minlength=n_cl ** 2
+        ).reshape(n_cl, n_cl),
+        labeled,
+        correct,
+    )
 
 
 def compute_score(hist, correct, labeled):
@@ -44,8 +48,9 @@ def intersectionAndUnion(imPred, imLab, numClass):
 
     # Compute area intersection:
     intersection = imPred * (imPred == imLab)
-    (area_intersection, _) = np.histogram(intersection, bins=numClass,
-                                          range=(1, numClass))
+    (area_intersection, _) = np.histogram(
+        intersection, bins=numClass, range=(1, numClass)
+    )
 
     # Compute area union:
     (area_pred, _) = np.histogram(imPred, bins=numClass, range=(1, numClass))
@@ -56,8 +61,9 @@ def intersectionAndUnion(imPred, imLab, numClass):
 
 
 def mean_pixel_accuracy(pixel_correct, pixel_labeled):
-    mean_pixel_accuracy = 1.0 * np.sum(pixel_correct) / (
-            np.spacing(1) + np.sum(pixel_labeled))
+    mean_pixel_accuracy = (
+        1.0 * np.sum(pixel_correct) / (np.spacing(1) + np.sum(pixel_labeled))
+    )
 
     return mean_pixel_accuracy
 

@@ -21,7 +21,7 @@ from easydict import EasyDict as edict
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelSummary
 import torch
-
+import pprint
 
 from pytorch_lightning.loggers import MLFlowLogger
 from pytorch_lightning.callbacks import (
@@ -31,6 +31,7 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.strategies import DDPStrategy
 
+pl.seed_everything(42)
 parser = argparse.ArgumentParser()
 # port = str(int(float(time.time())) % 20)
 # os.environ["MASTER_PORT"] = str(10097 + int(port))
@@ -42,7 +43,9 @@ parser.add_argument("--prefix", type=str, default="dummy")
 parser.add_argument("--ckpt", type=str, default="dummy")
 parser.add_argument("--dataset", type=str, default="NYUv2")
 parser.add_argument("--num_epochs", type=int, default=200)
+parser.add_argument("--thresholds", type=float, default=[0.3, 1.0], nargs="+")
 parser.add_argument("--ew", type=int, default=1)
+parser.add_argument("--batch_size", type=int, default=1)
 parser.add_argument("--lr", type=float, default=0.1)
 args = parser.parse_args()
 logger = MLFlowLogger(experiment_name="Eval", run_name=args.prefix)
@@ -56,18 +59,19 @@ update_parameters_in_config(
     dataset=args.dataset,
     prefix=args.prefix,
     overfit=args.overfit,
+    batch_size=args.batch_size,
 )
 config.num_classes = 3
 drv.init()
 print("%d device(s) found." % drv.Device.count())
-print(config)
+pprint.pprint(config)
 for ordinal in range(drv.Device.count()):
     dev = drv.Device(ordinal)
     print(ordinal, dev.name())
 if config.dataset == "NYUv2":
     data_module = NYUDataModule(config)
 else:
-    data_module = ScanNetSSCDataModule(config)
+    data_module = ScanNetSSCDataModule(config, thresholds=args.thresholds)
 
 config.steps_per_epoch = len(data_module.train_dataloader())
 if args.ckpt == "dummy":
@@ -101,6 +105,8 @@ ckpt = ModelCheckpoint(
     mode="max",
     monitor="val/sscmIOU",
 )
+
+
 # TODO Distributed evaluation as well
 trainer = pl.Trainer(
     auto_lr_find=False,

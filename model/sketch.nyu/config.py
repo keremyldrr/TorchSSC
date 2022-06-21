@@ -37,6 +37,7 @@ def update_parameters_in_config(
     overfit=False,
     dataset="NYUv2",
     prefix="",
+    batch_size=1,
 ):
     # C.log_dir = osp.abspath("log")
     # C.tb_dir = osp.abspath(osp.join(C.log_dir, "tb"))
@@ -93,28 +94,28 @@ def update_parameters_in_config(
         C.eval_source = osp.join(C.dataset_path, "val_frames.txt")
         C.dataset = "ScanNet"
         C.num_classes = 19
-
-        C.type2class = {
-            "empty": 0,
-            "cabinet": 1,
-            "bed": 2,
-            "chair": 3,
-            "sofa": 4,
-            "table": 5,
-            "door": 6,
-            "window": 7,
-            "bookshelf": 8,
-            "picture": 9,
-            "counter": 10,
-            "desk": 11,
-            "curtain": 12,
-            "refrigerator": 13,
-            "showercurtrain": 14,
-            "toilet": 15,
-            "sink": 16,
-            "bathtub": 17,
-            "garbagebin": 18,
-        }
+        C.type2class = {"empty": 0, "chair": 1, "table": 2}
+        # C.type2class = {
+        #     "empty": 0,
+        #     "cabinet": 1,
+        #     "bed": 2,
+        #     "chair": 3,
+        #     "sofa": 4,
+        #     "table": 5,
+        #     "door": 6,
+        #     "window": 7,
+        #     "bookshelf": 8,
+        #     "picture": 9,
+        #     "counter": 10,
+        #     "desk": 11,
+        #     "curtain": 12,
+        #     "refrigerator": 13,
+        #     "showercurtrain": 14,
+        #     "toilet": 15,
+        #     "sink": 16,
+        #     "bathtub": 17,
+        #     "garbagebin": 18,
+        # }
         C.image_mean = np.array([109.8, 97.2, 83.8]) / 255
 
         C.image_std = np.array([1, 1, 1])
@@ -143,7 +144,7 @@ def update_parameters_in_config(
     C.lr_power = 0.9
     C.momentum = 0.9
     C.weight_decay = 5e-4
-    C.batch_size = 2
+    C.batch_size = batch_size
     C.nepochs = 250
     C.niters_per_epoch = C.num_train_imgs // C.batch_size
     C.num_workers = 4

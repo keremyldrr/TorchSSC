@@ -55,6 +55,7 @@ update_parameters_in_config(
     dataset=args.dataset,
     prefix=args.prefix,
     overfit=args.overfit,
+    batch_size=2,
 )
 drv.init()
 print("%d device(s) found." % drv.Device.count())
@@ -65,7 +66,7 @@ for ordinal in range(drv.Device.count()):
 if config.dataset == "NYUv2":
     data_module = NYUDataModule(config)
 else:
-    data_module = ScanNetSSCDataModule(config)
+    data_module = ScanNetSSCDataModule(config, thresholds=[0.3, 1])
     config.num_classes = 3
 
 config.steps_per_epoch = len(data_module.train_dataloader())
@@ -78,8 +79,8 @@ model = Network(
     config=config,
 )
 lr_monitor = LearningRateMonitor(logging_interval="step")
-
 pprint.pprint(config)
+
 # TODO: add ckpt and metrics
 check_interval = 3
 ckpt = ModelCheckpoint(
@@ -89,6 +90,8 @@ ckpt = ModelCheckpoint(
     mode="max",
     monitor="val/sscmIOU",
 )
+
+
 trainer = pl.Trainer(
     auto_lr_find=False,
     devices=1,
@@ -100,11 +103,10 @@ trainer = pl.Trainer(
     val_check_interval=None if config.dataset == "NYUv2" else 500,
     limit_val_batches=0.25,
     log_every_n_steps=50,
-    callbacks=[lr_monitor, ckpt, ModelSummary()],
+    callbacks=[lr_monitor, ckpt],
     logger=logger,
     # overfit_batches=1,  # if not args.overfit else 1,
     # track_grad_norm=2,
-    detect_anomaly=True,
+    # detect_anomaly=True,
 )
-
 trainer.fit(model, datamodule=data_module)  # train(FLAGS)

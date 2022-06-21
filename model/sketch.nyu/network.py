@@ -1,5 +1,6 @@
 # encoding: utf-8
 
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,7 +11,7 @@ from collections import OrderedDict
 from config import config
 from resnet import get_resnet50
 from torch_poly_lr_decay import PolynomialLRDecay
-from score_utils import compute_metric, score_to_pred
+from score_utils import compute_metric, score_to_pred, print_ssc_iou
 import sys
 
 from sc_utils import export_grid
@@ -860,7 +861,7 @@ class Network(pl.LightningModule):
         opt = self.optimizers()
         sch = self.lr_schedulers()
         opt.zero_grad()
-        # pdb.set_trace()
+
         (
             output,
             _,
@@ -927,6 +928,8 @@ class Network(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        if batch is None:
+            return
         img = batch["data"].float()
         hha = batch["hha_img"]
         label = batch["label"]
@@ -934,6 +937,14 @@ class Network(pl.LightningModule):
         tsdf = batch["tsdf"].float()
         depth_mapping_3d = batch["depth_mapping_3d"]
         sketch_gt = batch["sketch_gt"].long()
+
+        # prev = 0.5
+        # b = 1.0
+        # # scores = batch["scores"]
+        # vis_mask = (
+        #     (scores > prev) & (scores <= b)
+        #     )
+        # scores = scores[vis_mask]
         # self.train()
         # with torch.no_grad():
         # (
@@ -945,32 +956,62 @@ class Network(pl.LightningModule):
         #     pred_mean,
         #     pred_log_var,
         # pdb.set_trace()
+        output, _, _ = self.forward(img, depth_mapping_3d, tsdf, sketch_gt)
+        # self.train()
+        # (
+        #     pred_semantic,
+        #     _,
+        #     pred_sketch_raw,
+        #     pred_sketch_gsnn,
+        #     pred_sketch,
+        #     pred_mean,
+        #     pred_log_var,
         # ) = self.forward(img, depth_mapping_3d, tsdf, sketch_gt)
-        output, _, pred_sketch_gsnn = self.forward(
-            img, depth_mapping_3d, tsdf, sketch_gt
-        )
 
-        score = output[0]
+        if self.config.dataset != "NYUv2":
+            label[label == 3] = 1
+            label[label == 5] = 2
+        bsize = len(img)  # output.shape[0]
+        batch_results = []
+        for b in range(bsize):
 
-        score = torch.exp(score).detach().cpu()
-        pred = score_to_pred(score)
+            # pdb.set_trace()
+            # output, _, pred_sketch_gsnn = self.forward(
+            #     img[b].unsqueeze(0), depth_mapping_3d[b].unsqueeze(0), tsdf[b].unsqueeze(0), sketch_gt[b].unsqueeze(0)
+            # )
+            # # pdb.set_trace()
+            score = output[b]
 
-        if self.debug:
-            pdb.set_trace()
-            export_grid(
-                "pred.ply", pred * label_weight.cpu().numpy().reshape(pred.shape)
-            )
+            score = torch.exp(score).detach().cpu()
+            pred = score_to_pred(score)
+            # print(pred.sum())
+            if self.debug:
+                prefix = batch["fn"][b]
 
-            export_grid("label_weight.ply", label_weight.reshape(pred.shape))
-            export_grid("label.ply", label.reshape(pred.shape))
-            export_grid("mapping.ply", (depth_mapping_3d != 307200).reshape(pred.shape))
-        results_dict = {
-            "pred": pred,
-            "label": label.detach().cpu(),
-            "label_weight": label_weight.detach().cpu(),
-            "name": batch["fn"],
-            "mapping": depth_mapping_3d.detach().cpu(),
-        }
+                export_grid(
+                    "{}_pred.ply".format(prefix),
+                    pred
+                    * label_weight[b].cpu().numpy().reshape(pred.shape).astype(int),
+                )
+
+                export_grid(
+                    "{}_label_weight.ply".format(prefix),
+                    label_weight[b].reshape(pred.shape).cpu().numpy().astype(int),
+                )
+                export_grid("{}_label.ply".format(prefix), label[b].reshape(pred.shape).cpu().numpy().astype(int))
+                export_grid(
+                    "{}_mapping.ply".format(prefix),
+                    (depth_mapping_3d[b] != 307200).cpu().numpy().reshape(pred.shape).astype(int),
+                )
+
+            results_dict = {
+                "pred": pred,
+                "label": label.detach().cpu(),
+                "label_weight": label_weight.detach().cpu(),
+                "name": batch["fn"][b],
+                "mapping": depth_mapping_3d.detach().cpu(),
+            }
+            batch_results.append(results_dict)
         # cri_weights = torch.ones(self.config.num_classes)
         # cri_weights[0] = self.config.empty_loss_weight
         # criterion = nn.CrossEntropyLoss(
@@ -1022,20 +1063,50 @@ class Network(pl.LightningModule):
         #     "val/loss/sketch_gsnn", loss_sketch_gsnn, sync_dist=True, on_epoch=True
         # )
         # self.log("val/loss/KLD", KLD, sync_dist=True, on_epoch=True)
-        return results_dict
+        return {"results": batch_results}
 
     def validation_epoch_end(self, val_step_outputs):
+        results_dicts = []
+
+        for e in val_step_outputs:
+            for x in e["results"]:
+                assert type(x) == type({}), "{} must be dictionary".format(str(type(x)))
+                results_dicts.append(x)
         # pdb.set_trace()
-        results_line, metric = compute_metric(
-            self.config, val_step_outputs, confusion=False
-        )
+
+        sc, ssc = compute_metric(self.config, results_dicts, confusion=False)
+
+        revdict = {}
+        for i, j in self.config.type2class.items():
+            revdict[j] = i
+        for c, sem_cp in enumerate(ssc[0].tolist()):
+            self.log(
+                "val/sscIOU/{}".format(revdict[c]), sem_cp, sync_dist=True, batch_size=1
+            )
+        # lines.append("--*-- Semantic Scene Completion --*--")
+        # lines.append("IOU: \n{}\n".format(str(names)))
+        # lines.append("meanIOU: %f\n" % ssc[2])
+        # lines.append("pixel-accuracy: %f\n" % ssc[3])
+        # lines.append("")
+        # lines.append("--*-- Scene Completion --*--\n")
+        # lines.append("IOU: %f\n" % sc[0])
+        # lines.append("pixel-accuracy: %f\n" % sc[1])  # 0 和 1 类的IOU
+        # lines.append("recall: %f\n" % sc[2])
+
+        # line = "\n".join(lines)
+        # print(line)
+        sscmIOU = ssc[2]
+        sscPixel = ssc[3]
+        scIOU = sc[0]
+        scPixel = sc[1]
+        scRecall = sc[2]
         # print("Val loss",val_sum_loss)
-        sscmIOU, sscPixel, scIOU, scPixel, scRecall = metric
-        self.log("val/sscmIOU", sscmIOU, sync_dist=True)
-        self.log("val/sscPixel", sscPixel, sync_dist=True)
-        self.log("val/scIOU", scIOU, sync_dist=True)
-        self.log("val/scPixel", scPixel, sync_dist=True)
-        self.log("val/scRecall", scRecall, sync_dist=True)
+        # sscmIOU, sscPixel, scIOU, scPixel, scRecall = metric
+        self.log("val/sscmIOU", sscmIOU, sync_dist=True, batch_size=1)
+        self.log("val/sscPixel", sscPixel, sync_dist=True, batch_size=1)
+        self.log("val/scIOU", scIOU, sync_dist=True, batch_size=1)
+        self.log("val/scPixel", scPixel, sync_dist=True, batch_size=1)
+        self.log("val/scRecall", scRecall, sync_dist=True, batch_size=1)
 
         return None
 

@@ -2,7 +2,8 @@
 # encoding: utf-8
 import numpy as np
 import torch
-from datasets.BaseDataset import BaseDataset
+
+# from datasets.BaseDataset import BaseDataset
 import os
 import cv2
 import io
@@ -14,7 +15,7 @@ from torch.utils.data import DataLoader
 from utils.img_utils import normalize
 
 
-class NYUv2(BaseDataset):
+class NYUv2:
     def __init__(
         self,
         setting,
@@ -25,7 +26,7 @@ class NYUv2(BaseDataset):
         only_frustum=False,
         only_box=False,
     ):
-        super(NYUv2, self).__init__(setting, split_name, preprocess, file_length)
+        # super(NYUv2, self).__init__(setting, split_name, preprocess, file_length)
         self._split_name = split_name
         self._img_path = setting["img_root"]
         self._gt_path = setting["gt_root"]
@@ -44,6 +45,9 @@ class NYUv2(BaseDataset):
         img_array = np.fromstring(value, dtype=np.uint8)
         img = cv2.imdecode(img_array, mode)
         return img
+
+    def __len__(self):
+        return len(self._file_names)
 
     def read_ceph_npz(self, value):
         f = BytesIO(value)
@@ -81,6 +85,18 @@ class NYUv2(BaseDataset):
             file_names.append([img_name, None])
 
         return file_names
+
+    def _construct_new_file_names(self, length):
+        assert isinstance(length, int)
+        files_len = len(self._file_names)  # 原来一轮迭代的长度
+        new_file_names = self._file_names * (length // files_len)  # 按照设定获得的一轮迭代的长度
+
+        rand_indices = torch.randperm(files_len).tolist()
+        new_indices = rand_indices[: length % files_len]
+
+        new_file_names += [self._file_names[i] for i in new_indices]
+
+        return new_file_names
 
     def __getitem__(self, index):
 

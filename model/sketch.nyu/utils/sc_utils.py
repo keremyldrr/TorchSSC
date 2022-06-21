@@ -120,6 +120,8 @@ def export_grid(outname, resh, ignore=[255, 0]):
         ]
     )
     #     resh = np.load("results_overfit_scannet_corrected/0000.npy").reshape(grid_shape)
+
+
     for x in range(grid_shape[0]):
         for y in range(grid_shape[1]):
             for z in range(grid_shape[2]):

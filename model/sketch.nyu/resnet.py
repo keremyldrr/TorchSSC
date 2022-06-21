@@ -4,14 +4,34 @@ from functools import partial
 import torch.nn as nn
 import functools
 
+
 class Bottleneck(nn.Module):
     expansion = 4
-    def __init__(self, inplanes, planes, stride=1, dilation=1, downsample=None, fist_dilation=1, multi_grid=1, bn_momentum=0.0003, BatchNorm2d=nn.BatchNorm2d):
+
+    def __init__(
+        self,
+        inplanes,
+        planes,
+        stride=1,
+        dilation=1,
+        downsample=None,
+        fist_dilation=1,
+        multi_grid=1,
+        bn_momentum=0.0003,
+        BatchNorm2d=nn.BatchNorm2d,
+    ):
         super(Bottleneck, self).__init__()
         self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, bias=False)
         self.bn1 = BatchNorm2d(planes, momentum=bn_momentum)
-        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,
-                               padding=dilation*multi_grid, dilation=dilation*multi_grid, bias=False)
+        self.conv2 = nn.Conv2d(
+            planes,
+            planes,
+            kernel_size=3,
+            stride=stride,
+            padding=dilation * multi_grid,
+            dilation=dilation * multi_grid,
+            bias=False,
+        )
         self.bn2 = BatchNorm2d(planes, momentum=bn_momentum)
         self.conv3 = nn.Conv2d(planes, planes * 4, kernel_size=1, bias=False)
         self.bn3 = BatchNorm2d(planes * 4, momentum=bn_momentum)
@@ -38,13 +58,22 @@ class Bottleneck(nn.Module):
         if self.downsample is not None:
             residual = self.downsample(x)
 
-        out = out + residual      
+        out = out + residual
         out = self.relu_inplace(out)
         return out
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, layers, num_classes, BatchNorm2d=nn.BatchNorm2d, dilation=[1,1,1,1], bn_momentum=0.0003, is_fpn=False):
+    def __init__(
+        self,
+        block,
+        layers,
+        num_classes,
+        BatchNorm2d=nn.BatchNorm2d,
+        dilation=[1, 1, 1, 1],
+        bn_momentum=0.0003,
+        is_fpn=False,
+    ):
         self.inplanes = 128
         self.is_fpn = is_fpn
         super(ResNet, self).__init__()
@@ -60,25 +89,99 @@ class ResNet(nn.Module):
         self.maxpool = nn.MaxPool2d(3, stride=2, padding=1, ceil_mode=False)
 
         self.relu = nn.ReLU(inplace=False)
-        self.layer1 = self._make_layer(block, 64, layers[0], stride=1, dilation=dilation[0], bn_momentum=bn_momentum, BatchNorm2d=BatchNorm2d)
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=1 if dilation[1]!=1 else 2, dilation=dilation[1], bn_momentum=bn_momentum, BatchNorm2d=BatchNorm2d)
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=1 if dilation[2]!=1 else 2, dilation=dilation[2], bn_momentum=bn_momentum, BatchNorm2d=BatchNorm2d)
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=1 if dilation[3]!=1 else 2, dilation=dilation[3], bn_momentum=bn_momentum, BatchNorm2d=BatchNorm2d)
+        self.layer1 = self._make_layer(
+            block,
+            64,
+            layers[0],
+            stride=1,
+            dilation=dilation[0],
+            bn_momentum=bn_momentum,
+            BatchNorm2d=BatchNorm2d,
+        )
+        self.layer2 = self._make_layer(
+            block,
+            128,
+            layers[1],
+            stride=1 if dilation[1] != 1 else 2,
+            dilation=dilation[1],
+            bn_momentum=bn_momentum,
+            BatchNorm2d=BatchNorm2d,
+        )
+        self.layer3 = self._make_layer(
+            block,
+            256,
+            layers[2],
+            stride=1 if dilation[2] != 1 else 2,
+            dilation=dilation[2],
+            bn_momentum=bn_momentum,
+            BatchNorm2d=BatchNorm2d,
+        )
+        self.layer4 = self._make_layer(
+            block,
+            512,
+            layers[3],
+            stride=1 if dilation[3] != 1 else 2,
+            dilation=dilation[3],
+            bn_momentum=bn_momentum,
+            BatchNorm2d=BatchNorm2d,
+        )
 
-    def _make_layer(self, block, planes, blocks, stride=1, dilation=1, multi_grid=1, bn_momentum=0.0003, BatchNorm2d=nn.BatchNorm2d):
+    def _make_layer(
+        self,
+        block,
+        planes,
+        blocks,
+        stride=1,
+        dilation=1,
+        multi_grid=1,
+        bn_momentum=0.0003,
+        BatchNorm2d=nn.BatchNorm2d,
+    ):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
-                nn.Conv2d(self.inplanes, planes * block.expansion,
-                          kernel_size=1, stride=stride, bias=False),
-                BatchNorm2d(planes * block.expansion, affine = True, momentum=bn_momentum))
+                nn.Conv2d(
+                    self.inplanes,
+                    planes * block.expansion,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False,
+                ),
+                BatchNorm2d(
+                    planes * block.expansion, affine=True, momentum=bn_momentum
+                ),
+            )
 
         layers = []
-        generate_multi_grid = lambda index, grids: grids[index%len(grids)] if isinstance(grids, tuple) else 1
-        layers.append(block(self.inplanes, planes, stride, dilation=dilation, downsample=downsample, multi_grid=generate_multi_grid(0, multi_grid), bn_momentum=bn_momentum, BatchNorm2d=BatchNorm2d))
+        generate_multi_grid = (
+            lambda index, grids: grids[index % len(grids)]
+            if isinstance(grids, tuple)
+            else 1
+        )
+        layers.append(
+            block(
+                self.inplanes,
+                planes,
+                stride,
+                dilation=dilation,
+                downsample=downsample,
+                multi_grid=generate_multi_grid(0, multi_grid),
+                bn_momentum=bn_momentum,
+                BatchNorm2d=BatchNorm2d,
+            )
+        )
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
-            layers.append(block(self.inplanes, planes, dilation=dilation, multi_grid=generate_multi_grid(i, multi_grid), bn_momentum=bn_momentum, BatchNorm2d=BatchNorm2d))
+            layers.append(
+                block(
+                    self.inplanes,
+                    planes,
+                    dilation=dilation,
+                    multi_grid=generate_multi_grid(i, multi_grid),
+                    bn_momentum=bn_momentum,
+                    BatchNorm2d=BatchNorm2d,
+                )
+            )
 
         return nn.Sequential(*layers)
 
@@ -90,8 +193,8 @@ class ResNet(nn.Module):
             x = self.maxpool(x)
             start_module = 2
         features = []
-        for i in range(start_module, end_module+1):
-            x = eval('self.layer%d'%(i-1))(x)
+        for i in range(start_module, end_module + 1):
+            x = eval("self.layer%d" % (i - 1))(x)
             features.append(x)
 
         if self.is_fpn:
@@ -103,15 +206,43 @@ class ResNet(nn.Module):
             return x
 
 
-def get_resnet101(num_classes=19, dilation=[1,1,1,1], bn_momentum=0.0003, is_fpn=False, BatchNorm2d=nn.BatchNorm2d):
-    model = ResNet(Bottleneck,[3, 4, 23, 3], num_classes, dilation=dilation, bn_momentum=bn_momentum, is_fpn=is_fpn, BatchNorm2d=BatchNorm2d)
+def get_resnet101(
+    num_classes=19,
+    dilation=[1, 1, 1, 1],
+    bn_momentum=0.0003,
+    is_fpn=False,
+    BatchNorm2d=nn.BatchNorm2d,
+):
+    model = ResNet(
+        Bottleneck,
+        [3, 4, 23, 3],
+        num_classes,
+        dilation=dilation,
+        bn_momentum=bn_momentum,
+        is_fpn=is_fpn,
+        BatchNorm2d=BatchNorm2d,
+    )
     return model
 
-def get_resnet50(num_classes=19, dilation=[1,1,1,1], bn_momentum=0.0003, is_fpn=False, BatchNorm2d=nn.BatchNorm2d):
-    model = ResNet(Bottleneck,[3, 4, 6, 3], num_classes, dilation=dilation, bn_momentum=bn_momentum, is_fpn=is_fpn, BatchNorm2d=BatchNorm2d)
+
+def get_resnet50(
+    num_classes=19,
+    dilation=[1, 1, 1, 1],
+    bn_momentum=0.0003,
+    is_fpn=False,
+    BatchNorm2d=nn.BatchNorm2d,
+):
+    model = ResNet(
+        Bottleneck,
+        [3, 4, 6, 3],
+        num_classes,
+        dilation=dilation,
+        bn_momentum=bn_momentum,
+        is_fpn=is_fpn,
+        BatchNorm2d=BatchNorm2d,
+    )
     return model
 
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     net = get_resnet50().cuda()
